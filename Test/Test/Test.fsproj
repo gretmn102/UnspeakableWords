@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net45</TargetFramework>
+	<Optimize>true</Optimize>
+    <Tailcalls>true</Tailcalls>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\UnspeakableWords\UnspeakableWords\UnspeakableWords.fsproj">
+      <Name>UnspeakableWords.fsproj</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Test.fs" />
+    <None Include="App.config" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="System.Runtime" />
+	<Reference Include="E:\Project\FsharpMyExtension\FsharpMyExtension\FsharpMyExtension\bin\Debug\net45\FsharpMyExtension.dll" />
+  </ItemGroup>
+  <Import Project="..\..\.paket\Paket.Restore.targets" />
+</Project>

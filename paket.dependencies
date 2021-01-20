@@ -1,11 +1,37 @@
-source https://www.nuget.org/api/v2
+source https://api.nuget.org/v3/index.json
+framework: netcoreapp3.1
+storage: none
 
-framework: >= net45
-nuget FAKE
-nuget FSharp.Core
-nuget Fuchu
+nuget Fable.Remoting.Giraffe
+nuget FParsec
+nuget FSharp.Data
+nuget Saturn
+nuget Expecto
+
+nuget Fable.Core
+nuget Fable.Elmish
+nuget Fable.Elmish.React
+nuget Fable.Elmish.Debugger
+nuget Fable.Elmish.HMR
+nuget Fable.FontAwesome.Free
+nuget Fable.Mocha
+nuget Fable.React
+nuget Fable.Remoting.Client
+nuget Fulma
+
+nuget Zanaptak.TypedCssClasses
+nuget FuChu
+// git https://github.com/gretmn102/FsharpMyExtension.git master build: "build.cmd", OS: windows
+// git https://github.com/gretmn102/FsharpMyExtension.git master build: "build.sh", OS: mono
 
 group Build
-source https://www.nuget.org/api/v2
+    source https://api.nuget.org/v3/index.json
+    framework: netstandard2.0
+    storage: none
 
-nuget FAKE
+    nuget FSharp.Core
+    nuget Fake.Core.ReleaseNotes
+    nuget Fake.Core.Target
+    nuget Fake.DotNet.Cli
+    nuget Fake.IO.FileSystem
+    nuget Farmer

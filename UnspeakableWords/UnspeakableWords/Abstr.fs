@@ -1,7 +1,6 @@
 module Abstr
-// ['А'..'Я'] |> Seq.iter (printfn "%c")
+open FsharpMyExtension
 open FsharpMyExtension.ListZipperCircle2
-open FsharpMyExtension.FSharpExt
 
 
 type LetterT = char
@@ -69,15 +68,16 @@ let draw n (p:Player) (st:State) next : Draws =
                     Pls = Map.add p.Name p st.Pls
                     Deck = deck
                 }
-            Draws(handList, next st)
+            Draws(List.rev handList, next st)
         else
             match deck with
             | [] ->
-                let xs, deck = List.splitAt n (List.rev st.Discards)
-                let hand, handList =
-                    xs |> List.fold (fun (hand, lst) x ->
-                                Set.add x hand, x::lst )
-                            (hand, handList)
+                let cardFromDeck, deck = List.splitAt n (List.rev st.Discards)
+                let hand =
+                    cardFromDeck
+                    |> List.fold (fun hand x ->
+                                Set.add x hand )
+                            hand
                 let p = { p with Hand = hand }
                 let st = {
                     st with
@@ -85,7 +85,7 @@ let draw n (p:Player) (st:State) next : Draws =
                         Pls = Map.add p.Name p st.Pls
                         Discards = []
                     }
-                DrawsWithDiscardReuse(handList, xs, next st)
+                DrawsWithDiscardReuse(List.rev handList, cardFromDeck, next st)
             | x::xs ->
                 f (Set.add x hand, x::handList) (n-1) xs
     f (p.Hand, []) n st.Deck
@@ -123,7 +123,7 @@ let chooseLetters wordExistInDic wordPts st next =
         | [] ->
             let cs = Set.toList p.Hand
             let st = { st with Discards = cs @ st.Discards }
-            
+
             let p = { p with Hand = Set.empty }
             let st = { st with Pls = Map.add pId p st.Pls }
             ChoosedDiscards(cs,
@@ -132,7 +132,7 @@ let chooseLetters wordExistInDic wordPts st next =
         | xs ->
             let ys = List.distinct xs
             if xs = ys then
-                
+
                 // let rec f' acc = function
                 //     | [] -> Some acc
                 //     | x::xs ->
@@ -165,7 +165,7 @@ let chooseLetters wordExistInDic wordPts st next =
             else LetterError f
     f
 let rec loop wordExistInDic wordPts (st:State)  =
-    let next st  = 
+    let next st  =
         fun () ->
         { st with PlsCircle = LZC.next st.PlsCircle }
         |> loop wordExistInDic wordPts
@@ -175,7 +175,7 @@ let rec loop wordExistInDic wordPts (st:State)  =
         let p = Map.find pId st.Pls
         Move(pId, chooseLetters wordExistInDic wordPts st next)
 
-let letters = 
+let letters =
     [('A', 5, 10); ('B', 5, 2); ('C', 0, 2); ('D', 2, 3); ('E', 4, 10);
      ('F', 3, 2);  ('G', 2, 2); ('H', 4, 3); ('I', 4, 9); ('J', 2, 1);
      ('K', 3, 1);  ('L', 1, 5); ('M', 3, 3); ('N', 2, 5); ('O', 0, 8);

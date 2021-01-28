@@ -9,24 +9,21 @@ open Shared
 // open FsharpMyExtension
 // open FsharpMyExtension.Either
 
-
-let counter = ref 0
-
-let sendMessage () =
-    let res = sprintf "counter: %d" !counter
-    counter := !counter + 1
-    res
-
-let todosApi =
+open Prelude
+let iApi:IApi =
     {
-        sendMessage = fun x ->
-            async { return sendMessage () }
+        login = fun userId ->
+            async { return m.PostAndReply(fun r -> Login(userId, r)) }
+        getState = fun userId ->
+            async { return m.PostAndReply(fun r -> GetState(userId, r)) }
+        move = fun userId ->
+            async { return m.PostAndReply(fun r -> Move(userId, r)) }
     }
 
 let webApp =
     Remoting.createApi()
     |> Remoting.withRouteBuilder Route.builder
-    |> Remoting.fromValue todosApi
+    |> Remoting.fromValue iApi
     |> Remoting.buildHttpHandler
 
 let app =

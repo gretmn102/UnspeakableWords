@@ -7,6 +7,7 @@
   <ItemGroup>
     <None Include="paket.references" />
     <Compile Include="Abstr.fs" />
+    <Compile Include="Prelude.fs" />
     <Compile Include="Server.fs" />
   </ItemGroup>
   <ItemGroup>

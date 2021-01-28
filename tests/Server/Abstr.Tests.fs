@@ -1,13 +1,13 @@
-open Fuchu
+module Abstr.Tests
+open Expecto
+
 open FsharpMyExtension
-open FsharpMyExtension.FSharpExt
 #if INTERACTIVE
-#load @"..\..\UnspeakableWords\UnspeakableWords\Abstr.fs"
+#load @"..\..\src\Server\Abstr.fs"
 #endif
 open Abstr
 open FsharpMyExtension.ListZipperCircle2
 
-[<Tests>]
 let DrawTest =
     testList "DrawTest" [
         testCase "DrawsWithDiscardReuse 1 case" <| fun () ->
@@ -32,8 +32,7 @@ let DrawTest =
                     | End st -> st
                     | x -> failwith "2"
                 | x -> failwith "1"
-
-            Assert.Equal("", exp, act)
+            Expect.equal act exp ""
         testCase "DrawsWithDiscardReuse 2 return" <| fun () ->
             let p = { Name = "0"; Hand = Set.empty; Points = 0; Reason = 0 }
             let letters = ['a'..'g'] |> List.mapi (fun i x -> x, i)
@@ -65,7 +64,7 @@ let DrawTest =
                     | End st -> st
                     | x -> failwithf "%A\n2" x
                 | x -> failwithf "%A\n1" x
-            Assert.Equal("", exp, act)
+            Expect.equal act exp ""
         testCase "Draws return" <| fun () ->
             let p = { Name = "0"; Hand = Set.empty; Points = 0; Reason = 0 }
             // let letter = 'a', 0
@@ -95,21 +94,5 @@ let DrawTest =
                     | x -> failwithf "%A\n2" x
                 | x -> failwithf "%A\n1" x
 
-            Assert.Equal("", exp, act)
-
-        // testCase "" <| fun () ->
-
-        //     Assert.Equal("", exp, act)
+            Expect.equal act exp ""
    ]
-
-[<Tests>]
-let simpleTest =
-    testCase "A simple test" <|
-        fun _ ->
-            //Assert.Equal("2+3", 4, 2+3)
-            (10, "20") |> function (a, b) as x -> Assert.Equal("comma a b = (a, b)", x, comma 10 b)
-let ran = System.Random() |> fun x k n-> x.Next(k, n)
-
-[<EntryPoint>]
-let main arg =
-    defaultMainThisAssembly arg

@@ -1,65 +1,56 @@
 module Abstr
 open FsharpMyExtension
 open FsharpMyExtension.ListZipperCircle2
-
-
-type LetterT = char
-type LetterId = int
-type Letter = { Name:LetterT; Points:int; Count:int }
-
-type PlayerId = string
-type LetterUniq = LetterT * LetterId
-type Player = {
-    Name: PlayerId
-    Hand: LetterUniq Set
-    Points: int
-    Reason: int
-}
+open FsharpMyExtension.Either
+open Shared
 
 type State = {
     PlsCircle: PlayerId LZC
-    Pls: Map<PlayerId, Player>
-    Deck : LetterUniq list
-    Discards : LetterUniq list
+    Pls: Map<PlayerId, Player<LetterId Set>>
+    Deck : LetterId list
+    Discards : LetterId list
     /// Уже использованные слова
-    UsedWords: string Set
+    UsedWords: Word Set
 }
 
-type PlsApproving =
-    | PlsWordApproved of CthulhuApproving
-    | PlsNotWordApproved of ChooseLetters
-and WordRes =
-    // /// Одно из указанных букв отсутствует на руке.
-    | LetterError of ChooseLetters
-    | WordWasUsed of ChooseLetters
-    | ChoosedDiscards of LetterUniq list * Draws
-    /// Слово отсутствует в словаре. Устраивается голосование между остальными игроками - допустимо слово или нет.
-    | WordNotExist of PlayerId list * (bool -> PlsApproving)
-    | WordSuccess of CthulhuApproving
-/// Если список пуст - у игрока сбрасываются карты и он добирает по-новой.
-and ChooseLetters = (LetterUniq list -> WordRes)
-and Mov =
-    | Move of PlayerId * ChooseLetters
-    | End of State
-/// избавление от рекурсии
-and Move = (unit -> Mov)
+type Move = (unit -> Mov)
 and Draws =
-    | Draws of LetterUniq list * Move
+    | Draws of LetterId list * Move
     /// В колоде не хватило карт, чтобы восполнить руку. Отбой переворачивается и считается как колода.
     /// Первый список - карты со старой колоды, 2-ой из новой.
-    | DrawsWithDiscardReuse of LetterUniq list * LetterUniq list * Move
-and InsanityResult =
+    | DrawsWithDiscardReuse of LetterId list * LetterId list * Move
+and InsaneCheckResult =
     /// Спятил. Карты с руки отправляются в отбой.
-    | GotInsane of LetterUniq list * Move
+    | GotInsane of LetterId list * Move
     | NotInsane of Draws
+and SanityCheckResult =
+    | Pass of Draws
+    | NotPass of InsaneCheckResult
 /// Первое значение - сколько нужно выбросить, второе - итог броска игральной кости.
 /// Если игральная кость показала наибольшее значение - Ктулху одобрил слово, и ему совсем не важно, сколько там требовалось получить.
 /// А если же x = y тогда ?
-and CthulhuApproving = (int*int) * InsanityResult
+and CthulhuApproving = (int*int) * SanityCheckResult
+and PlsApproving =
+    | PlsWordApproved of CthulhuApproving
+    | PlsNotWordApproved
+and WordRes =
+    /// Слово отсутствует в словаре. Устраивается голосование между остальными игроками - допустимо слово или нет.
+    | WordNotExist of PlayerId list * (bool -> PlsApproving)
+    | WordSuccess of CthulhuApproving
+and MoveType =
+    {
+        DiscardHand: unit -> LetterId list * Draws
+        /// The input list must not be empty
+        PlayWord: Word -> Either<MovError, WordRes>
+    }
+and Mov =
+    | Move of PlayerId * MoveType
+    | End of State
+
 /// Наибольшее количество карт, которое может держать каждый игрок.
 let handCap = 7
 
-let draw n (p:Player) (st:State) next : Draws =
+let draw n (p:Player<LetterId Set>) (st:State) next : Draws =
     let rec f (hand, handList) n deck =
         if n <= 0 then // достаточно '=', но кто его знает.
             let p = { p with Hand = hand }
@@ -75,9 +66,10 @@ let draw n (p:Player) (st:State) next : Draws =
                 let cardFromDeck, deck = List.splitAt n (List.rev st.Discards)
                 let hand =
                     cardFromDeck
-                    |> List.fold (fun hand x ->
-                                Set.add x hand )
-                            hand
+                    |> List.fold
+                        (fun hand x ->
+                            Set.add x hand)
+                        hand
                 let p = { p with Hand = hand }
                 let st = {
                     st with
@@ -95,75 +87,81 @@ let throwDice =
     let r = System.Random()
     let n = diceMax + 1
     fun () -> r.Next(1, n)
-let cthulhuApproving pts (st:State) loop : CthulhuApproving =
+let cthulhuApproving pts word (st:State) loop : CthulhuApproving =
     let diceVal = throwDice ()
     let p = LZC.hole st.PlsCircle |> flip Map.find st.Pls
+    
+    let f p =
+        let p = { p with Hand = word |> List.fold (flip Set.remove) p.Hand }
+        let st =
+            { st with
+                Pls = Map.add p.Name p st.Pls
+                UsedWords = Set.add word st.UsedWords
+            }
+        draw (handCap - Set.count p.Hand) p st loop
+
     if pts <= diceVal || diceVal = diceMax then
-        let draw = draw handCap p st loop
-        NotInsane draw
+        Pass (f p)
     else
-        let reason = p.Reason - 1
-        let p = { p with Reason = reason }
+        let reason = p.SanityPoints - 1
+        let p = { p with SanityPoints = reason }
         if reason > 0 then
-            let draw = draw handCap p st loop
-            NotInsane draw
+            NotInsane (f p)
         else
             let xs = p.Hand |> Set.toList
-            let st = {
-                st with
+            let st =
+                { st with
                     Pls = Map.add p.Name p st.Pls
                     Discards = xs @ st.Discards
                 }
-            InsanityResult.GotInsane(xs, loop st)
+            GotInsane(xs, loop st)
+        |> NotPass
     |> fun x -> (pts, diceVal), x
 let chooseLetters wordExistInDic wordPts st next =
     let pId = LZC.hole st.PlsCircle
     let p = Map.find pId st.Pls
-    let rec f = function
-        | [] ->
+
+    {
+        DiscardHand = fun () ->
             let cs = Set.toList p.Hand
             let st = { st with Discards = cs @ st.Discards }
 
             let p = { p with Hand = Set.empty }
             let st = { st with Pls = Map.add pId p st.Pls }
-            ChoosedDiscards(cs,
-                draw handCap p st next
-            ) //|> Some
-        | xs ->
-            let ys = List.distinct xs
-            if xs = ys then
-
-                // let rec f' acc = function
-                //     | [] -> Some acc
-                //     | x::xs ->
-                //         if Set.contains x acc then
-                //             f' (Set.remove x acc) xs
-                //         else None
-                // match f' p.Hand xs with
-                // | Some hand ->
-                if List.forall (flip Set.contains p.Hand) xs then
-                    let word =
-                        xs |> List.map fst //>> System.Char.ToLower)
-                        |> System.String.Concat
-                    if Set.contains word st.UsedWords then
-                        WordWasUsed f
-                    elif wordExistInDic word then
-                    // let p = { p with Hand = xs |> List.fold (flip Set.remove) p.Hand }
-                        // let p = { p with Hand = hand }
-                        // let st = { st with Pls = Map.add pId p st.Pls }
-                        WordSuccess(cthulhuApproving (wordPts xs) st next)
+            cs, draw handCap p st next
+        PlayWord =
+            function
+            | [] -> Left WordIsEmpty
+            | word ->
+                let ys = List.distinct word
+                if word = ys then
+                    // let rec f' acc = function
+                    //     | [] -> Some acc
+                    //     | x::xs ->
+                    //         if Set.contains x acc then
+                    //             f' (Set.remove x acc) xs
+                    //         else None
+                    // match f' p.Hand xs with
+                    // | Some hand ->
+                    if List.forall (flip Set.contains p.Hand) word then
+                        if Set.contains word st.UsedWords then
+                            Left WordWasUsed
+                        elif wordExistInDic word then
+                            WordSuccess(cthulhuApproving (wordPts word) word st next)
+                            |> Right
+                        else
+                            let rest = LZC.removeR st.PlsCircle |> Option.get |> LZC.toList
+                            WordNotExist(rest, function
+                                | true ->
+                                    PlsWordApproved(cthulhuApproving (wordPts word) word st next)
+                                | false -> PlsNotWordApproved
+                            )
+                            |> Right
                     else
-                        let rest = LZC.removeR st.PlsCircle |> Option.get |> LZC.toList
-                        WordNotExist(rest, function
-                            | true ->
-                                PlsWordApproved(cthulhuApproving (wordPts xs) st next)
-                            | false -> PlsNotWordApproved f
-                        )
-                else
-                // | None ->
-                    LetterError f
-            else LetterError f
-    f
+                        Left LetterError
+                else Left LetterError
+    }
+
 let rec loop wordExistInDic wordPts (st:State)  =
     let next st  =
         fun () ->
@@ -174,12 +172,3 @@ let rec loop wordExistInDic wordPts (st:State)  =
         let pId = LZC.hole st.PlsCircle
         let p = Map.find pId st.Pls
         Move(pId, chooseLetters wordExistInDic wordPts st next)
-
-let letters =
-    [('A', 5, 10); ('B', 5, 2); ('C', 0, 2); ('D', 2, 3); ('E', 4, 10);
-     ('F', 3, 2);  ('G', 2, 2); ('H', 4, 3); ('I', 4, 9); ('J', 2, 1);
-     ('K', 3, 1);  ('L', 1, 5); ('M', 3, 3); ('N', 2, 5); ('O', 0, 8);
-     ('P', 3, 2);  ('Q', 2, 1); ('R', 4, 5); ('S', 0, 5); ('T', 2, 5);
-     ('U', 0, 4);  ('V', 1, 2); ('W', 3, 2); ('X', 4, 1); ('Y', 3, 2);
-     ('Z', 2, 1)]
-    |> List.map (fun (name, pts, count) -> { Name = name; Points = pts; Count = count})

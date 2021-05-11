@@ -16,8 +16,10 @@ let iApi:IApi =
             async { return m.PostAndReply(fun r -> Login(userId, r)) }
         getState = fun userId ->
             async { return m.PostAndReply(fun r -> GetState(userId, r)) }
-        move = fun userId ->
-            async { return m.PostAndReply(fun r -> Move(userId, r)) }
+        move = fun x ->
+            async { return m.PostAndReply(fun r -> Move(x, r)) }
+        getSet = fun () ->
+            async { return Set [ 1 ] }
     }
 
 let webApp =

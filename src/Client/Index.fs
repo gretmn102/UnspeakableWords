@@ -3,21 +3,21 @@ module Index
 open Elmish
 open Fable.Remoting.Client
 open Shared
+open Shared.Client
 
 type Deferred<'t> =
     | HasNotStartedYet
     | InProgress
     | Resolved of 't
-type GameState =
-    {
-        CurrentPlayerMove:UserId option
-    }
+
 type State =
     {
-        PlayerId: string
+        PlayerId: UserId
         LoginResult: Result<unit, LoginError> Deferred
-        GameLog: int * Map<int, GameResponse GetStateResult>
-        GameState: GameState option
+        GameLog: int * Map<int, string>
+        GameState: Client.GameState option
+        PlayersTable: {| Remain:int; OtherPlayers:UserId Set |}
+        SelectedLetters: LetterId list
     }
 
 type Msg =
@@ -26,11 +26,17 @@ type Msg =
     | ChangeUserId of string
 
     | GetState of sleep:int
-    | GetStateResult of Result<GameResponse GetStateResult list, GetStateError>
+    | GetStateResult of Result<GetStateResult<GameResponse, Client.GameState> list, GetStateError>
     | RemoveNotify of int
 
     | Move
     | MoveResult of Result<unit,MoveError>
+
+    | SelectedLettersAdd of LetterId
+    | SelectedLettersRemove of LetterId
+
+    | GetSet
+    | GetSetResult of T
 
 let todosApi =
     Remoting.createApi()
@@ -44,9 +50,11 @@ let init(): State * Cmd<Msg> =
             PlayerId = ""
             GameLog = 0, Map.empty
             GameState = None
+            PlayersTable = {| Remain = 0; OtherPlayers = Set.empty |}
+            SelectedLetters = []
         }
     state, Cmd.none
-let removeNotifyMs = 5000
+let removeNotifyMs = 15000
 let update (msg: Msg) (state: State): State * Cmd<Msg> =
     match msg with
     | GetState sleep ->
@@ -64,44 +72,150 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
         match res with
         | Ok x ->
             let i, gameLog = state.GameLog
-            let i', gameLog, res =
+            let i', gameLog, state =
                 x
                 |> List.fold
-                    (fun (i, gameLog, (st:GameState option)) x ->
+                    (fun (i, gameLog, (st:State)) x ->
                         let st =
                             match x with
-                            | GameStarted ->
-                                match st with
-                                | None ->
-                                    {
-                                        CurrentPlayerMove = None
-                                    }
-                                    |> Some
-                                | x -> x
-                            | WaitPlayers _
-                            | PlayerJoined _
-                            | PlayerLeaved _ -> st
+                            | GameStarted gameState ->
+                                { st with
+                                    GameState = gameState |> Some }
+                            | WaitPlayers count ->
+                                { state with
+                                    PlayersTable = {| state.PlayersTable with Remain = count |}
+                                }
+                            | PlayerJoined userId ->
+                                { state with
+                                    PlayersTable =
+                                        let playersTable = state.PlayersTable
+                                        {| playersTable with OtherPlayers = Set.remove userId playersTable.OtherPlayers |}
+                                }
+                            | PlayerLeaved userId ->
+                                { state with
+                                    PlayersTable =
+                                        let playersTable = state.PlayersTable
+                                        {| playersTable with OtherPlayers = Set.add userId playersTable.OtherPlayers |}
+                                }
                             | GameResponse x ->
+                                let gameState =
+                                    match st.GameState with
+                                    | Some gameState -> gameState
+                                    | None ->
+                                        failwith "GameState was null"
                                 match x with
                                 | NowTurn userId ->
-                                    match st with
-                                    | Some x ->
-                                        { x with
-                                            CurrentPlayerMove = Some userId
+                                    { st with
+                                        GameState =
+                                            { gameState with
+                                                CurrentPlayerMove = userId
+                                                MoveStage =
+                                                    if state.PlayerId = userId then
+                                                        StartingMove
+                                                    else
+                                                        HasNotYourMoveYet
+                                            }
+                                            |> Some
+                                    }
+                                | TakeLetters letters ->
+                                    { st with
+                                        GameState =
+                                            { gameState with
+                                                ClientPlayer =
+                                                    let p = gameState.ClientPlayer
+                                                    { p with
+                                                        Hand =
+                                                            letters
+                                                            |> List.fold (fun st x -> x :: st) p.Hand
+                                                    }
+                                            }
+                                            |> Some
+                                    }
+                                    // st
+                                | DiscardToDeck -> st
+                                | WordSucc word ->
+                                    let gameState =
+                                        let currentPlayerId = gameState.CurrentPlayerMove
+                                        if currentPlayerId = st.PlayerId then
+                                            { gameState with
+                                                ClientPlayer =
+                                                    let p = gameState.ClientPlayer
+                                                    { p with
+                                                        Hand =
+                                                            let s = Set.ofList word
+                                                            p.Hand |> List.filter (fun x -> not <| Set.contains x s)
+                                                            // |> List.fold (fun st x -> Set.remove x st) p.Hand
+                                                    }
+                                            }
+                                        else
+                                            let pls = gameState.OtherPlayers
+                                            let p = pls.[currentPlayerId]
+                                            { gameState with
+                                                OtherPlayers =
+                                                    Map.add
+                                                        currentPlayerId
+                                                        { p with
+                                                            Hand = p.Hand - word.Length
+                                                        }
+                                                        pls
+                                            }
+                                    { st with
+                                        GameState =
+                                            { gameState with
+                                                PlayedWords =
+                                                    (word, gameState.CurrentPlayerMove)::gameState.PlayedWords
+                                            }
+                                            |> Some
+                                    }
+                                | CthulhuApproving(points, throwResult, res) ->
+                                    match res with
+                                    | Pass -> st
+                                    | NotPass ->
+                                        { st with
+                                            GameState =
+                                                let currentPlayerId = gameState.CurrentPlayerMove
+                                                if currentPlayerId = st.PlayerId then
+                                                    { gameState with
+                                                        ClientPlayer =
+                                                            let p = gameState.ClientPlayer
+                                                            { p with SanityPoints = p.SanityPoints - 1}
+                                                    }
+                                                else
+                                                    let pls = gameState.OtherPlayers
+                                                    let p = pls.[currentPlayerId]
+                                                    { gameState with
+                                                        OtherPlayers =
+                                                            Map.add
+                                                                currentPlayerId
+                                                                { p with SanityPoints = p.SanityPoints - 1}
+                                                                pls
+                                                    }
+                                                |> Some
                                         }
-                                        |> Some
-                                    | None ->
-                                        {
-                                            CurrentPlayerMove = Some userId
-                                        }
-                                        |> Some
-                        i + 1, Map.add i x gameLog, st
+                                        // st
+                                | InsaneCheck _ -> st
+                                    // { st with
+                                    //     GameState =
+                                    //         { gameState with
+                                    //             Discard = letters @ gameState.Discard
+                                    //         }
+                                    //         |> Some
+                                    // }
+                                | Discard letters ->
+                                    { st with
+                                        GameState =
+                                            { gameState with
+                                                Discard = letters @ gameState.Discard
+                                            }
+                                            |> Some
+                                    }
+                            | GameEnded -> st
+                        i + 1, Map.add i (sprintf "%A" x) gameLog, st
                     )
-                    (i, gameLog, state.GameState)
+                    (i, gameLog, state)
             let state =
                 { state with
                     GameLog = i', gameLog
-                    GameState = res
                 }
             let cmd =
                 let xs =
@@ -139,12 +253,46 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
                     i', Map.remove i gameLog }
         state, Cmd.none
     | Move ->
-        let cmd = Cmd.OfAsync.perform todosApi.move state.PlayerId MoveResult
+        let cmd =
+            Cmd.OfAsync.perform todosApi.move (state.PlayerId, state.SelectedLetters) MoveResult
+        let state =
+            { state with
+                SelectedLetters = []
+                GameState =
+                    state.GameState
+                    |> Option.map (fun gameState ->
+                        { gameState with
+                            MoveStage = ApprovingWord
+                        }
+                    )
+            }
         state, cmd
     | MoveResult x ->
-        printfn "%A" x
-        state, Cmd.none
+        let state =
+            match x with
+            | Ok _ -> state
+            | Error err ->
+                let i, log = state.GameLog
 
+                { state with
+                    GameLog = i + 1, Map.add i (sprintf "%A" err) log }
+        state, Cmd.none
+    | SelectedLettersAdd letter ->
+        let state =
+            { state with
+                SelectedLetters = state.SelectedLetters @ [letter] }
+        state, Cmd.none
+    | SelectedLettersRemove letter ->
+        let state =
+            { state with
+                SelectedLetters = List.filter ((<>) letter) state.SelectedLetters }
+        state, Cmd.none
+    | GetSet ->
+        let cmd =
+            Cmd.OfAsync.perform todosApi.getSet () GetSetResult
+        state, cmd
+    | GetSetResult s ->
+        state, Cmd.none
 open Fable.React
 open Fable.React.Props
 open Fulma
@@ -203,20 +351,87 @@ let containerBox (state : State) (dispatch : Msg -> unit) =
             ]
         | HasNotStartedYet ->
             loginBox
+
+        Button.button [
+            Button.OnClick (fun _ -> dispatch GetSet)
+        ] [
+            str "Get set"
+        ]
+
         match state.GameState with
         | Some gameState ->
-            match gameState.CurrentPlayerMove with
-            | Some userId ->
-                if userId = state.PlayerId then
-                    Control.p [ ] [
-                        Button.a [
-                            Button.OnClick (fun _ -> dispatch Move)
-                        ] [
-                            Fa.i [ Fa.Solid.Walking ] []
+            Columns.columns [] [
+                Column.column [] [
+                    gameState.PlayedWords
+                    |> List.map (fun (word, userId) ->
+                        tr [] [
+                            td [] [
+                                word
+                                |> System.String.Concat
+                                |> str
+                            ]
+                            td [] [
+                                str userId
+                            ]
                         ]
+                    )
+                    |> fun xs ->
+                        Table.table [] [
+                            tbody [] xs
+                        ]
+                ]
+
+                Column.column [] [
+                    div [] [
+                        str (sprintf "CurrentPlayerId: %s" gameState.CurrentPlayerMove)
                     ]
-            | None -> ()
-        | None -> ()
+
+                    match gameState.MoveStage with
+                    | HasNotYourMoveYet -> ()
+                    | StartingMove ->
+                        let s = Set.ofList state.SelectedLetters
+                        gameState.ClientPlayer.Hand
+                        |> List.choose (fun letter ->
+                            if Set.contains letter s then None
+                            else
+                                Button.span [
+                                    Button.OnClick (fun _ -> dispatch (SelectedLettersAdd letter))
+                                ] [
+                                    str (string letter)
+                                ]
+                                |> Some
+                        )
+                        |> div []
+
+                        state.SelectedLetters
+                        |> List.map (fun letter ->
+                            Button.span [
+                                Button.OnClick (fun _ -> dispatch (SelectedLettersRemove letter))
+                            ] [
+                                str (string letter)
+                            ]
+                        )
+                        |> div []
+
+                        Control.p [ ] [
+                            Button.a [
+                                Button.Disabled (List.isEmpty state.SelectedLetters)
+                                Button.OnClick (fun _ -> dispatch Move)
+                            ] [
+                                Fa.i [ Fa.Solid.Walking ] []
+                            ]
+                        ]
+                    | ApprovingWord ->
+                        div [] [
+                            str "ApprovingWord"
+                        ]
+
+                    div [] [
+                        str (sprintf "%A" gameState)
+                    ]
+                ]
+            ]
+        | None -> () //str "not started"
     ]
 
 let view (state : State) (dispatch : Msg -> unit) =
@@ -239,13 +454,14 @@ let view (state : State) (dispatch : Msg -> unit) =
         Hero.body [ ] [
             Container.container [ ] [
                 Column.column [
-                    Column.Width (Screen.All, Column.Is6)
-                    Column.Offset (Screen.All, Column.Is3)
+                    // Column.Width (Screen.All, Column.Is6)
+                    // Column.Offset (Screen.All, Column.Is3)
                 ] [
                     Heading.p [ Heading.Modifiers [ Modifier.TextAlignment (Screen.All, TextAlignment.Centered) ] ] [ str "UnspeakableWords" ]
                     containerBox state dispatch
                 ]
             ]
+
             state.GameLog
             |> snd
             |> Seq.map (fun (KeyValue(i, x)) ->
@@ -266,10 +482,10 @@ let view (state : State) (dispatch : Msg -> unit) =
             |> List.ofSeq
             |> ul [
                 Style [
-                        Position PositionOptions.Absolute
-                        ZIndex 1
-                        Bottom 0
-                        Right 0
+                    Position PositionOptions.Absolute
+                    ZIndex 1
+                    Bottom 0
+                    Right 0
                 ]
             ]
         ]

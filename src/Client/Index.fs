@@ -1,7 +1,7 @@
 module Index
 
 open Elmish
-open Fable.Remoting.Client
+open Elmish.Bridge
 open Shared
 open Shared.Client
 
@@ -10,76 +10,80 @@ type Deferred<'t> =
     | InProgress
     | Resolved of 't
 
+
+type Connection =
+    | Disconnected
+    | Waiting
+    | Connected of Result<unit, LoginError>
+
 type State =
     {
         PlayerId: UserId
-        LoginResult: Result<unit, LoginError> Deferred
+        Connection: Connection
         GameLog: int * Map<int, string>
         GameState: Client.GameState option
         PlayersTable: {| Remain:int; OtherPlayers:UserId Set |}
         SelectedLetters: LetterId list
+        ConnectedUsers : User list
     }
 
 type Msg =
+    | RC of RemoteClientMsg
+    | ConnectionLost
+
     | Login
-    | LoginResult of Result<unit, LoginError>
     | ChangeUserId of string
 
-    | GetState of sleep:int
-    | GetStateResult of Result<GetStateResult<GameResponse, Client.GameState> list, GetStateError>
     | RemoveNotify of int
 
     | Move
-    | MoveResult of Result<unit,MoveError>
 
     | SelectedLettersAdd of LetterId
     | SelectedLettersRemove of LetterId
 
-    | GetSet
-    | GetSetResult of T
-
-let todosApi =
-    Remoting.createApi()
-    |> Remoting.withRouteBuilder Route.builder
-    |> Remoting.buildProxy<IApi>
+    // | GetSet
+    // | GetSetResult of T
 
 let init(): State * Cmd<Msg> =
     let state =
         {
-            LoginResult = HasNotStartedYet
             PlayerId = ""
             GameLog = 0, Map.empty
             GameState = None
             PlayersTable = {| Remain = 0; OtherPlayers = Set.empty |}
             SelectedLetters = []
+            Connection = Disconnected
+            ConnectedUsers = []
         }
     state, Cmd.none
-let removeNotifyMs = 15000
+
+let removeNotifyMs = 5 * 60 * 1000
+
 let update (msg: Msg) (state: State): State * Cmd<Msg> =
     match msg with
-    | GetState sleep ->
-        let cmd =
-            if sleep > 0 then
-                let step x = async {
-                    do! Async.Sleep sleep
-                    return! todosApi.getState x
-                }
-                Cmd.OfAsync.perform step state.PlayerId GetStateResult
-            else
-                Cmd.OfAsync.perform todosApi.getState state.PlayerId GetStateResult
-        state, cmd
-    | GetStateResult res ->
-        match res with
-        | Ok x ->
+    | RC rc ->
+        match rc with
+        | LoginResult res ->
+            { state with Connection = Connected res }, Cmd.none
+        | QueryConnected ->
+            match state.Connection with
+            | Connected(Ok _) ->
+                { Name = state.PlayerId; Color = Black }
+                |> SetUser
+                |> Bridge.Send
+            | Waiting | Disconnected _ | Connected _ -> ()
+
+            state, Cmd.bridgeSend UsersConnected
+        | GameMsgs msgs ->
             let i, gameLog = state.GameLog
             let i', gameLog, state =
-                x
+                msgs
                 |> List.fold
-                    (fun (i, gameLog, (st:State)) x ->
-                        let st =
+                    (fun (i, gameLog, (state:State)) x ->
+                        let state =
                             match x with
                             | GameStarted gameState ->
-                                { st with
+                                { state with
                                     GameState = gameState |> Some }
                             | WaitPlayers count ->
                                 { state with
@@ -99,13 +103,13 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
                                 }
                             | GameResponse x ->
                                 let gameState =
-                                    match st.GameState with
+                                    match state.GameState with
                                     | Some gameState -> gameState
                                     | None ->
                                         failwith "GameState was null"
                                 match x with
                                 | NowTurn userId ->
-                                    { st with
+                                    { state with
                                         GameState =
                                             { gameState with
                                                 CurrentPlayerMove = userId
@@ -118,7 +122,7 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
                                             |> Some
                                     }
                                 | TakeLetters letters ->
-                                    { st with
+                                    { state with
                                         GameState =
                                             { gameState with
                                                 ClientPlayer =
@@ -131,12 +135,11 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
                                             }
                                             |> Some
                                     }
-                                    // st
-                                | DiscardToDeck -> st
+                                | DiscardToDeck -> state
                                 | WordSucc word ->
                                     let gameState =
                                         let currentPlayerId = gameState.CurrentPlayerMove
-                                        if currentPlayerId = st.PlayerId then
+                                        if currentPlayerId = state.PlayerId then
                                             { gameState with
                                                 ClientPlayer =
                                                     let p = gameState.ClientPlayer
@@ -159,7 +162,7 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
                                                         }
                                                         pls
                                             }
-                                    { st with
+                                    { state with
                                         GameState =
                                             { gameState with
                                                 PlayedWords =
@@ -169,12 +172,12 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
                                     }
                                 | CthulhuApproving(points, throwResult, res) ->
                                     match res with
-                                    | Pass -> st
+                                    | Pass -> state
                                     | NotPass ->
-                                        { st with
+                                        { state with
                                             GameState =
                                                 let currentPlayerId = gameState.CurrentPlayerMove
-                                                if currentPlayerId = st.PlayerId then
+                                                if currentPlayerId = state.PlayerId then
                                                     { gameState with
                                                         ClientPlayer =
                                                             let p = gameState.ClientPlayer
@@ -192,8 +195,7 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
                                                     }
                                                 |> Some
                                         }
-                                        // st
-                                | InsaneCheck _ -> st
+                                | InsaneCheck _ -> state
                                     // { st with
                                     //     GameState =
                                     //         { gameState with
@@ -202,15 +204,15 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
                                     //         |> Some
                                     // }
                                 | Discard letters ->
-                                    { st with
+                                    { state with
                                         GameState =
                                             { gameState with
                                                 Discard = letters @ gameState.Discard
                                             }
                                             |> Some
                                     }
-                            | GameEnded -> st
-                        i + 1, Map.add i (sprintf "%A" x) gameLog, st
+                            | GameEnded -> state
+                        i + 1, Map.add i (sprintf "%A" x) gameLog, state
                     )
                     (i, gameLog, state)
             let state =
@@ -227,22 +229,26 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
                         }
                         |> Cmd.OfAsync.result
                     )
-                Cmd.ofMsg (GetState 1000) :: xs
-                |> Cmd.batch
+                Cmd.batch xs
             state, cmd
-        | Error(errorValue) ->
-            printfn "%A" errorValue
-            state, Cmd.ofMsg (GetState 1000)
-    | Login ->
-        let cmd = Cmd.OfAsync.perform todosApi.login state.PlayerId LoginResult
-        let state = { state with LoginResult = InProgress }
-        state, cmd
-    | LoginResult res ->
-        let cmd =
-            match res with
-            | Ok () -> Cmd.ofMsg (GetState 0)
-            | Error _ -> Cmd.none
-        { state with LoginResult = Resolved res }, cmd
+        | MoveResult x ->
+            let state =
+                match x with
+                | Ok _ -> state
+                | Error err ->
+                    let i, log = state.GameLog
+
+                    { state with
+                        GameLog = i + 1, Map.add i (sprintf "%A" err) log }
+            state, Cmd.none
+
+        | GetUsers(_)
+        | AddUser(_)
+        | RemoveUser(_)
+        | AddMsg(_)
+        | AddMsgs(_) as x ->
+            printfn "not implemented yet1 '%A'" x
+            state, Cmd.none
     | ChangeUserId userId ->
         { state with PlayerId = userId }, Cmd.none
     | RemoveNotify i ->
@@ -254,7 +260,7 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
         state, Cmd.none
     | Move ->
         let cmd =
-            Cmd.OfAsync.perform todosApi.move (state.PlayerId, state.SelectedLetters) MoveResult
+            Cmd.bridgeSend (Shared.Move state.SelectedLetters)
         let state =
             { state with
                 SelectedLetters = []
@@ -267,16 +273,7 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
                     )
             }
         state, cmd
-    | MoveResult x ->
-        let state =
-            match x with
-            | Ok _ -> state
-            | Error err ->
-                let i, log = state.GameLog
 
-                { state with
-                    GameLog = i + 1, Map.add i (sprintf "%A" err) log }
-        state, Cmd.none
     | SelectedLettersAdd letter ->
         let state =
             { state with
@@ -287,12 +284,14 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
             { state with
                 SelectedLetters = List.filter ((<>) letter) state.SelectedLetters }
         state, Cmd.none
-    | GetSet ->
-        let cmd =
-            Cmd.OfAsync.perform todosApi.getSet () GetSetResult
-        state, cmd
-    | GetSetResult s ->
-        state, Cmd.none
+    | Login ->
+        match state.PlayerId with
+        | "" -> state, Cmd.none
+        | name ->
+            { state with Connection = Waiting }, Cmd.bridgeSend( SetUser { Name = name; Color = Black } )
+    | ConnectionLost ->
+        { state with Connection = Disconnected }, Cmd.none
+
 open Fable.React
 open Fable.React.Props
 open Fulma
@@ -338,25 +337,19 @@ let containerBox (state : State) (dispatch : Msg -> unit) =
                     ]
                 ]
             ]
-        match state.LoginResult with
-        | Resolved x ->
+        match state.Connection with
+        | Connected x ->
             match x with
             | Ok () -> ()
             | Error err ->
                 loginBox
                 div [] [str (sprintf "%A" err)]
-        | InProgress ->
+        | Waiting ->
             div [] [
                 Fa.i [ Fa.IconOption.Size Fa.ISize.Fa3x; Fa.Solid.Spinner; Fa.Spin ] []
             ]
-        | HasNotStartedYet ->
+        | Disconnected ->
             loginBox
-
-        Button.button [
-            Button.OnClick (fun _ -> dispatch GetSet)
-        ] [
-            str "Get set"
-        ]
 
         match state.GameState with
         | Some gameState ->

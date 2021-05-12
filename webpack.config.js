@@ -29,7 +29,7 @@ var CONFIG = {
                changeOrigin: true
            },
         // redirect websocket requests that start with /socket/ to the server on the port 8086
-        '/socket/**': {
+        '/socket': {
             target: 'http://localhost:' + (process.env.SERVER_PROXY_PORT || "8086"),
             ws: true
            }

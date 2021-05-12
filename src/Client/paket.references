@@ -4,5 +4,5 @@ Fable.Elmish.React
 Fable.Elmish.HMR
 Fable.FontAwesome.Free
 Fable.React
-Fable.Remoting.Client
+Elmish.Bridge.Client
 Fulma

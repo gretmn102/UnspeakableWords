@@ -1,9 +1,5 @@
 namespace Shared
 
-module Route =
-    let builder typeName methodName =
-        sprintf "/api/%s/%s" typeName methodName
-
 type UserId = string
 
 type LetterId = int
@@ -52,7 +48,7 @@ module Client =
         }
     type MoveStage =
         | HasNotYourMoveYet
-        | StartingMove 
+        | StartingMove
         | ApprovingWord
     type GameState =
         {
@@ -105,16 +101,38 @@ module Init =
         |> List.concat
 
     let sanityPoints = 5
-type T =
-    int Set
-    // Client.GameState
-    // {
-    //     SomeSet:(string * string) Set
-    // }
-type IApi =
-    {
-        login: UserId -> Async<Result<unit, LoginError>>
-        getState: UserId -> Async<Result<GetStateResult<GameResponse, Client.GameState> list, GetStateError>>
-        move: (UserId * Word) -> Async<Result<unit, MoveError>>
-        getSet: unit -> Async<T>
-    }
+
+type Color =
+    | Red
+    | Green
+    | Blue
+    | Black
+
+type User = { Name : string; Color: Color }
+type Message = {Time : System.DateTime; Content: string}
+
+type Msgs =
+    | ClientMsg of string * Message
+    | SysMsg of Message
+
+type RemoteClientMsg =
+    | QueryConnected
+    | GetUsers of User list
+
+    | AddUser of User
+    | RemoveUser of string
+    | AddMsg of Msgs
+    | AddMsgs of Msgs list
+
+    | GameMsgs of GetStateResult<GameResponse, Client.GameState> list
+    | LoginResult of Result<unit, LoginError>
+    | MoveResult of Result<unit, MoveError>
+
+type RemoteServerMsg =
+    | SetUser of User
+    | SendMsg of string
+    | UsersConnected
+    | Move of Word
+
+module Remote =
+    let socketPath = "/socket"

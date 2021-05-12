@@ -41,9 +41,6 @@ type Msg =
     | SelectedLettersAdd of LetterId
     | SelectedLettersRemove of LetterId
 
-    // | GetSet
-    // | GetSetResult of T
-
 let init(): State * Cmd<Msg> =
     let state =
         {
@@ -64,7 +61,18 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
     | RC rc ->
         match rc with
         | LoginResult res ->
-            { state with Connection = Connected res }, Cmd.none
+            let state =
+                match res with
+                | Ok gameState ->
+                    { state with
+                        Connection = Connected (Ok ())
+                        GameState = gameState
+                    }
+                | Error err ->
+                    { state with
+                        Connection = Connected (Error err)
+                    }
+            state, Cmd.none
         | QueryConnected ->
             match state.Connection with
             | Connected(Ok _) ->
@@ -340,7 +348,82 @@ let containerBox (state : State) (dispatch : Msg -> unit) =
         match state.Connection with
         | Connected x ->
             match x with
-            | Ok () -> ()
+            | Ok () ->
+                match state.GameState with
+                | Some gameState ->
+                    Columns.columns [] [
+                        Column.column [] [
+                            gameState.PlayedWords
+                            |> List.map (fun (word, userId) ->
+                                tr [] [
+                                    td [] [
+                                        word
+                                        |> System.String.Concat
+                                        |> str
+                                    ]
+                                    td [] [
+                                        str userId
+                                    ]
+                                ]
+                            )
+                            |> fun xs ->
+                                Table.table [] [
+                                    tbody [] xs
+                                ]
+                        ]
+
+                        Column.column [] [
+                            div [] [
+                                str (sprintf "CurrentPlayerId: %s" gameState.CurrentPlayerMove)
+                            ]
+
+                            match gameState.MoveStage with
+                            | HasNotYourMoveYet -> ()
+                            | StartingMove ->
+                                let s = Set.ofList state.SelectedLetters
+                                gameState.ClientPlayer.Hand
+                                |> List.choose (fun letter ->
+                                    if Set.contains letter s then None
+                                    else
+                                        Button.span [
+                                            Button.OnClick (fun _ -> dispatch (SelectedLettersAdd letter))
+                                        ] [
+                                            str (string letter)
+                                        ]
+                                        |> Some
+                                )
+                                |> div []
+
+                                state.SelectedLetters
+                                |> List.map (fun letter ->
+                                    Button.span [
+                                        Button.OnClick (fun _ -> dispatch (SelectedLettersRemove letter))
+                                    ] [
+                                        str (string letter)
+                                    ]
+                                )
+                                |> div []
+
+                                Control.p [ ] [
+                                    Button.a [
+                                        Button.Disabled (List.isEmpty state.SelectedLetters)
+                                        Button.OnClick (fun _ -> dispatch Move)
+                                    ] [
+                                        Fa.i [ Fa.Solid.Walking ] []
+                                    ]
+                                ]
+                            | ApprovingWord ->
+                                div [] [
+                                    str "ApprovingWord"
+                                ]
+                            | GameEnd -> str "GameEnd"
+
+                            div [] [
+                                str (sprintf "%A" gameState)
+                            ]
+                        ]
+                    ]
+                | None -> () //str "not started"
             | Error err ->
                 loginBox
                 div [] [str (sprintf "%A" err)]
@@ -351,80 +434,6 @@ let containerBox (state : State) (dispatch : Msg -> unit) =
         | Disconnected ->
             loginBox
 
-        match state.GameState with
-        | Some gameState ->
-            Columns.columns [] [
-                Column.column [] [
-                    gameState.PlayedWords
-                    |> List.map (fun (word, userId) ->
-                        tr [] [
-                            td [] [
-                                word
-                                |> System.String.Concat
-                                |> str
-                            ]
-                            td [] [
-                                str userId
-                            ]
-                        ]
-                    )
-                    |> fun xs ->
-                        Table.table [] [
-                            tbody [] xs
-                        ]
-                ]
-
-                Column.column [] [
-                    div [] [
-                        str (sprintf "CurrentPlayerId: %s" gameState.CurrentPlayerMove)
-                    ]
-
-                    match gameState.MoveStage with
-                    | HasNotYourMoveYet -> ()
-                    | StartingMove ->
-                        let s = Set.ofList state.SelectedLetters
-                        gameState.ClientPlayer.Hand
-                        |> List.choose (fun letter ->
-                            if Set.contains letter s then None
-                            else
-                                Button.span [
-                                    Button.OnClick (fun _ -> dispatch (SelectedLettersAdd letter))
-                                ] [
-                                    str (string letter)
-                                ]
-                                |> Some
-                        )
-                        |> div []
-
-                        state.SelectedLetters
-                        |> List.map (fun letter ->
-                            Button.span [
-                                Button.OnClick (fun _ -> dispatch (SelectedLettersRemove letter))
-                            ] [
-                                str (string letter)
-                            ]
-                        )
-                        |> div []
-
-                        Control.p [ ] [
-                            Button.a [
-                                Button.Disabled (List.isEmpty state.SelectedLetters)
-                                Button.OnClick (fun _ -> dispatch Move)
-                            ] [
-                                Fa.i [ Fa.Solid.Walking ] []
-                            ]
-                        ]
-                    | ApprovingWord ->
-                        div [] [
-                            str "ApprovingWord"
-                        ]
-
-                    div [] [
-                        str (sprintf "%A" gameState)
-                    ]
-                ]
-            ]
-        | None -> () //str "not started"
     ]
 
 let view (state : State) (dispatch : Msg -> unit) =

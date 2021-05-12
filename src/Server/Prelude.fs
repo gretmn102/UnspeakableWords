@@ -11,7 +11,7 @@ type 'a Res =
     }
 
 type T =
-    | Login of UserId * AsyncReplyChannel<Result<unit, LoginError> Res>
+    | Login of UserId * AsyncReplyChannel<Result<Client.GameState option, LoginError> Res>
     | Move of (UserId * Word) * AsyncReplyChannel<Result<unit, MoveError> Res>
 
 type GameState =
@@ -21,6 +21,48 @@ type State =
     {
         Players: Map<UserId, unit>
         GameState: GameState option
+        AbstrState: Abstr.State option
+    }
+
+let toClientGameState currPlayerId (abstrState:Abstr.State) (gameState:GameState) : Client.GameState =
+    let pls = abstrState.Pls
+    {
+        OtherPlayers =
+            pls
+            |> Map.map (fun userId v ->
+                {
+                    Client.PlayerId = userId
+                    Client.SanityPoints = v.SanityPoints
+                    Client.Points = v.Points
+                    Client.Hand = Abstr.handCap
+                }
+            )
+        CurrentPlayerMove =
+            LZC.hole abstrState.PlsCircle
+        ClientPlayer =
+            let p = pls.[currPlayerId]
+            {
+                Name = p.Name
+                Hand = Set.toList p.Hand
+                Points = p.Points
+                SanityPoints = p.SanityPoints
+            }
+        PlayedWords =
+            abstrState.UsedWordsBy
+        Discard =
+            abstrState.Discards
+        MoveStage =
+
+            match gameState with
+            | Mov m ->
+                match m with
+                | Abstr.Move(_, currPlayerIdMove, _) ->
+                    if currPlayerId = currPlayerIdMove then
+                        Client.StartingMove
+                    else
+                        Client.HasNotYourMoveYet
+                | Abstr.End _ ->
+                    Client.GameEnd
     }
 
 let maxPlayers = 3
@@ -39,8 +81,17 @@ let m =
                     | Login(userId, r) ->
                         let playersCount = Map.count st.Players
                         if Map.containsKey userId st.Players then
-                            justReturn (Error YouAlreadyLogin)
-                            |> r.Reply
+
+                            match st.AbstrState, st.GameState with
+                            | Some abstrState, Some gameState ->
+                                toClientGameState userId abstrState gameState
+                                |> Some
+                                |> Ok
+                                |> justReturn
+                                |> r.Reply
+                            | _ ->
+                                justReturn (Ok None)
+                                |> r.Reply
 
                             st
                         elif playersCount >= maxPlayers then
@@ -78,6 +129,21 @@ let m =
                                         )
                                         (playersMsgs, Map.empty, deck)
                                 let allLetters = Map.ofList Init.allLetters
+
+                                let abstrState: Abstr.State =
+                                    {
+                                        PlsCircle =
+                                            playersMsgs
+                                            |> Seq.map (fun (KeyValue(userId, _)) -> userId)
+                                            |> List.ofSeq
+                                            |> LZC.ofList
+                                        Pls = pls
+                                        Deck = deck
+                                        Discards = []
+                                        UsedWords = Set.empty
+                                        UsedWordsBy = []
+                                    }
+
                                 let gameState =
                                     Abstr.loop
                                         (fun _ -> true)
@@ -89,22 +155,12 @@ let m =
                                                 | None -> 0
                                             )
                                         )
-                                        {
-                                            PlsCircle =
-                                                playersMsgs
-                                                |> Seq.map (fun (KeyValue(userId, _)) -> userId)
-                                                |> List.ofSeq
-                                                |> LZC.ofList
-                                            Pls = pls
-                                            Deck = deck
-                                            Discards = []
-                                            UsedWords = Set.empty
-                                        }
+                                        abstrState
                                 let playersMsgs =
                                     playersMsgs
                                     |> Map.map (fun currPlayerId v ->
                                         match gameState with
-                                        | Abstr.Move(currPlayerIdMove, _) ->
+                                        | Abstr.Move(state, currPlayerIdMove, _) ->
                                             let x =
                                                 {
                                                     Client.OtherPlayers =
@@ -140,7 +196,7 @@ let m =
                                             GameEnded::v
                                     )
                                 {
-                                    Return = Ok ()
+                                    Return = Ok None
                                     PlayersMsgs = playersMsgs
                                 }
                                 |> r.Reply
@@ -151,10 +207,12 @@ let m =
                                         |> Some
                                     Players =
                                         st.Players |> Map.add userId ()
+                                    AbstrState =
+                                        Some abstrState
                                 }
                             else
                                 {
-                                    Return = Ok ()
+                                    Return = Ok None
                                     PlayersMsgs = playersMsgs
                                 }
                                 |> r.Reply
@@ -170,11 +228,10 @@ let m =
                                 match gameState with
                                 | Mov mov ->
                                     match mov with
-                                    | Abstr.Move(currPlayer, f) ->
+                                    | Abstr.Move(abstrState, currPlayer, f) ->
                                         if currPlayer = userId then
                                             match f.PlayWord word with
                                             | Right x ->
-
                                                 let st, playersMsgs =
                                                     match x with
                                                     | Abstr.WordSuccess((points, throwResult), x) ->
@@ -184,22 +241,22 @@ let m =
                                                                 [GameResponse (WordSucc word)]
                                                             )
                                                         let turn st playersMsgs = function
-                                                            | Abstr.Move(currPlayerIdMove, _) ->
+                                                            | Abstr.Move(abstrState, currPlayerIdMove, _) ->
                                                                 let playersMsgs =
                                                                     playersMsgs
                                                                     |> Map.map (fun userId' v ->
                                                                         GameResponse (NowTurn currPlayerIdMove)::v
                                                                     )
 
-                                                                st, playersMsgs
-                                                            | Abstr.End _ ->
+                                                                { st with AbstrState = Some abstrState }, playersMsgs
+                                                            | Abstr.End abstrState ->
                                                                 let playersMsgs =
                                                                     playersMsgs
                                                                     |> Map.map (fun userId' v ->
                                                                         GameEnded::v
                                                                     )
 
-                                                                st, playersMsgs
+                                                                { st with AbstrState = Some abstrState }, playersMsgs
                                                         let drawf playersMsgs = function
                                                             | Abstr.Draws(letters, f) ->
                                                                 let playersMsgs =
@@ -294,6 +351,7 @@ let m =
             {
                 Players = Map.empty
                 GameState = None
+                AbstrState = None
             }
         loop st
     )

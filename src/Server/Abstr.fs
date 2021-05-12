@@ -11,6 +11,7 @@ type State = {
     Discards : LetterId list
     /// Уже использованные слова
     UsedWords: Word Set
+    UsedWordsBy: (Word * PlayerId) list
 }
 
 type Move = (unit -> Mov)
@@ -44,7 +45,7 @@ and MoveType =
         PlayWord: Word -> Either<MovError, WordRes>
     }
 and Mov =
-    | Move of PlayerId * MoveType
+    | Move of State * PlayerId * MoveType
     | End of State
 
 /// Наибольшее количество карт, которое может держать каждый игрок.
@@ -90,13 +91,14 @@ let throwDice =
 let cthulhuApproving pts word (st:State) loop : CthulhuApproving =
     let diceVal = throwDice ()
     let p = LZC.hole st.PlsCircle |> flip Map.find st.Pls
-    
+
     let f p =
         let p = { p with Hand = word |> List.fold (flip Set.remove) p.Hand }
         let st =
             { st with
                 Pls = Map.add p.Name p st.Pls
                 UsedWords = Set.add word st.UsedWords
+                UsedWordsBy = (word, p.Name)::st.UsedWordsBy
             }
         draw (handCap - Set.count p.Hand) p st loop
 
@@ -171,4 +173,4 @@ let rec loop wordExistInDic wordPts (st:State)  =
     else
         let pId = LZC.hole st.PlsCircle
         let p = Map.find pId st.Pls
-        Move(pId, chooseLetters wordExistInDic wordPts st next)
+        Move(st, pId, chooseLetters wordExistInDic wordPts st next)

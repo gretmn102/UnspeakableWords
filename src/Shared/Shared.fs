@@ -50,6 +50,7 @@ module Client =
         | HasNotYourMoveYet
         | StartingMove
         | ApprovingWord
+        | GameEnd
     type GameState =
         {
             OtherPlayers: Map<UserId, OtherPlayer>
@@ -125,7 +126,7 @@ type RemoteClientMsg =
     | AddMsgs of Msgs list
 
     | GameMsgs of GetStateResult<GameResponse, Client.GameState> list
-    | LoginResult of Result<unit, LoginError>
+    | LoginResult of Result<Client.GameState option, LoginError>
     | MoveResult of Result<unit, MoveError>
 
 type RemoteServerMsg =

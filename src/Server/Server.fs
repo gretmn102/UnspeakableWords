@@ -62,6 +62,18 @@ let sendCLient userId (msgs:RemoteClientMsg) =
         msgs
     success
 
+let sendAllMessages currentUserId clientDispatch playersMsgs =
+    playersMsgs
+    |> Map.iter (fun userId msgs ->
+        if currentUserId <> userId then
+            let success = sendCLient userId (GameMsgs msgs)
+            // TODO: и что делать с сообщениями, если игрок вышел?
+            ()
+    )
+
+    Map.tryFind currentUserId playersMsgs
+    |> Option.iter (GameMsgs >> clientDispatch)
+
 let update clientDispatch msg state =
     match msg with
     | Closed ->
@@ -72,7 +84,7 @@ let update clientDispatch msg state =
             let msg =
                 {
                     Time = System.DateTime.Now
-                    Content = u.Name+" left the room"
+                    Content = u.Name + " left the room"
                 }
                 |> SysMsg
             history.Put msg
@@ -96,6 +108,7 @@ let update clientDispatch msg state =
             clientDispatch (AddMsgs (history.Get()))
             state, Cmd.none
         | state, SetUser u ->
+
             match state with
             | Disconnected ->
                 if nameInUse u.Name then
@@ -120,29 +133,21 @@ let update clientDispatch msg state =
                     |> LoginResult
                     |> clientDispatch
 
-                    x.PlayersMsgs
-                    |> Map.iter (fun userId msgs ->
-                        if u.Name <> userId then
-                            let success = sendCLient userId (GameMsgs msgs)
-                            // TODO: и что делать с сообщениями, если игрок вышел?
-                            ()
-                    )
-
-                    x.PlayersMsgs.[u.Name]
-                    |> GameMsgs
-                    |> clientDispatch
+                    sendAllMessages u.Name clientDispatch x.PlayersMsgs
 
                     let state =
                         match x.Return with
                         | Ok x ->
                             Connected u
                         | _ -> state
+
                     state, Cmd.none
             | Connected(_) ->
                 clientDispatch (LoginResult (Error YouAlreadyLogin))
                 state, Cmd.none
 
         | state, Shared.Move word ->
+            printfn "Shared.Move word %A" word
             match state with
             | Connected u ->
                 let x = m.PostAndReply(fun r -> Move((u.Name, word), r))
@@ -151,17 +156,7 @@ let update clientDispatch msg state =
                 |> MoveResult
                 |> clientDispatch
 
-                x.PlayersMsgs
-                |> Map.iter (fun userId msgs ->
-                    if u.Name <> userId then
-                        let success = sendCLient userId (GameMsgs msgs)
-                        // TODO: и что делать с сообщениями, если игрок вышел?
-                        ()
-                )
-
-                x.PlayersMsgs.[u.Name]
-                |> GameMsgs
-                |> clientDispatch
+                sendAllMessages u.Name clientDispatch x.PlayersMsgs
             | Disconnected ->
                 Error (GetStateError YouAreNotLogin)
                 |> MoveResult

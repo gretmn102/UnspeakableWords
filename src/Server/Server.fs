@@ -108,10 +108,29 @@ let update clientDispatch msg state =
             clientDispatch (AddMsgs (history.Get()))
             state, Cmd.none
         | state, SetUser u ->
+            let f u =
+                let x = m.PostAndReply(fun r -> Login(u.Name, r))
+
+                x.Return
+                |> LoginResult
+                |> clientDispatch
+
+                sendAllMessages u.Name clientDispatch x.PlayersMsgs
+
+                let state =
+                    match x.Return with
+                    | Ok x ->
+                        Connected u
+                    | _ -> state
+
+                state, Cmd.none
 
             match state with
             | Disconnected ->
                 if nameInUse u.Name then
+                    #if DEBUG
+                    f u
+                    #else
                     SysMsg {
                         Time = System.DateTime.Now
                         Content = "Name is in use"
@@ -121,33 +140,16 @@ let update clientDispatch msg state =
 
                     clientDispatch (LoginResult (Error YouAlreadyLogin))
                     state, Cmd.none
+                    #endif
                 else
                     connections.BroadcastClient(AddUser u)
                     let msg = SysMsg {Time=System.DateTime.Now; Content = u.Name + " joined the room"}
                     history.Put msg
                     connections.BroadcastClient(AddMsg msg)
 
-                    let x = m.PostAndReply(fun r -> Login(u.Name, r))
-
-                    x.Return
-                    |> LoginResult
-                    |> clientDispatch
-
-                    sendAllMessages u.Name clientDispatch x.PlayersMsgs
-
-                    let state =
-                        match x.Return with
-                        | Ok x ->
-                            Connected u
-                        | _ -> state
-
-                    state, Cmd.none
-            | Connected(_) ->
-                clientDispatch (LoginResult (Error YouAlreadyLogin))
-                state, Cmd.none
-
+                    f u
+            | Connected u -> f u
         | state, Shared.Move word ->
-            printfn "Shared.Move word %A" word
             match state with
             | Connected u ->
                 let x = m.PostAndReply(fun r -> Move((u.Name, word), r))

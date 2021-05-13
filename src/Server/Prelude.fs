@@ -67,7 +67,7 @@ let toClientGameState currPlayerId (abstrState:Abstr.State) (gameState:GameState
 
 let maxPlayers = 3
 
-let exec st =
+let exec state =
     let justReturn x =
         {
             Return = x
@@ -75,10 +75,10 @@ let exec st =
         }
     function
     | Login(userId, r) ->
-        let playersCount = Map.count st.Players
-        if Map.containsKey userId st.Players then
+        let playersCount = Map.count state.Players
+        if Map.containsKey userId state.Players then
 
-            match st.AbstrState, st.GameState with
+            match state.AbstrState, state.GameState with
             | Some abstrState, Some gameState ->
                 toClientGameState userId abstrState gameState
                 |> Some
@@ -89,15 +89,15 @@ let exec st =
                 justReturn (Ok None)
                 |> r.Reply
 
-            st
+            state
         elif playersCount >= maxPlayers then
             justReturn (Error PlayersRecruited)
             |> r.Reply
 
-            st
+            state
         else
             let playersMsgs =
-                st.Players
+                state.Players
                 |> Map.map (fun _ v ->
                     [PlayerJoined userId]
                 )
@@ -197,12 +197,12 @@ let exec st =
                 }
                 |> r.Reply
 
-                { st with
+                { state with
                     GameState =
                         Mov gameState
                         |> Some
                     Players =
-                        st.Players |> Map.add userId ()
+                        state.Players |> Map.add userId ()
                     AbstrState =
                         Some abstrState
                 }
@@ -213,13 +213,13 @@ let exec st =
                 }
                 |> r.Reply
 
-                { st with
+                { state with
                     Players =
-                        st.Players |> Map.add userId ()
+                        state.Players |> Map.add userId ()
                 }
     | Move((userId, word), r) ->
-        if Map.containsKey userId st.Players then
-            match st.GameState with
+        if Map.containsKey userId state.Players then
+            match state.GameState with
             | Some gameState ->
                 match gameState with
                 | Mov mov ->
@@ -232,11 +232,11 @@ let exec st =
                                     match x with
                                     | Abstr.WordSuccess((points, throwResult), x) ->
                                         let playersMsgs =
-                                            st.Players
+                                            state.Players
                                             |> Map.map (fun userId' v ->
                                                 [GameResponse (WordSucc word)]
                                             )
-                                        let turn st playersMsgs = function
+                                        let turn state playersMsgs = function
                                             | Abstr.Move(abstrState, currPlayerIdMove, _) ->
                                                 let playersMsgs =
                                                     playersMsgs
@@ -244,7 +244,7 @@ let exec st =
                                                         GameResponse (NowTurn currPlayerIdMove)::v
                                                     )
 
-                                                { st with AbstrState = Some abstrState }, playersMsgs
+                                                { state with AbstrState = Some abstrState }, playersMsgs
                                             | Abstr.End abstrState ->
                                                 let playersMsgs =
                                                     playersMsgs
@@ -252,7 +252,7 @@ let exec st =
                                                         GameEnded::v
                                                     )
 
-                                                { st with AbstrState = Some abstrState }, playersMsgs
+                                                { state with AbstrState = Some abstrState }, playersMsgs
                                         let drawf playersMsgs = function
                                             | Abstr.Draws(letters, f) ->
                                                 let playersMsgs =
@@ -261,7 +261,7 @@ let exec st =
 
                                                 let res = f ()
                                                 let state =
-                                                    { st with
+                                                    { state with
                                                         GameState = Some (Mov res)
                                                     }
                                                 turn state playersMsgs res
@@ -279,7 +279,19 @@ let exec st =
                                                     Map.add currPlayer x playersMsgs
                                                 let res = f ()
                                                 let state =
-                                                    { st with
+                                                    { state with
+                                                        GameState = Some (Mov res)
+                                                    }
+                                                turn state playersMsgs res
+                                            | Abstr.DeckIsOver f ->
+                                                let playersMsgs =
+                                                    playersMsgs
+                                                    |> Map.map (fun userId' v ->
+                                                        GameResponse DeckIsOver::v
+                                                    )
+                                                let res = f ()
+                                                let state =
+                                                    { state with
                                                         GameState = Some (Mov res)
                                                     }
                                                 turn state playersMsgs res
@@ -314,7 +326,7 @@ let exec st =
                                                     )
                                                 let res = f ()
                                                 let state =
-                                                    { st with
+                                                    { state with
                                                         GameState = Some (Mov res)
                                                     }
                                                 turn state playersMsgs res
@@ -328,19 +340,19 @@ let exec st =
                             | Left err ->
                                 justReturn (Error (MovError err))
                                 |> r.Reply
-                                st
+                                state
                         else
                             r.Reply (justReturn (Error NotYourMove))
-                            st
+                            state
                     | Abstr.End _ ->
                         r.Reply (justReturn (Error GameEndedError))
-                        st
+                        state
             | None ->
                 r.Reply (justReturn (Error GameHasNotStartedYet))
-                st
+                state
         else
             r.Reply (justReturn (Error (GetStateError YouAreNotLogin)))
-            st
+            state
 
 let m =
     MailboxProcessor.Start (fun mail ->

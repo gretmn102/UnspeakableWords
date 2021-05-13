@@ -54,7 +54,7 @@ let init(): State * Cmd<Msg> =
         }
     state, Cmd.none
 
-let removeNotifyMs = 5 * 60 * 1000
+let removeNotifyMs = 1 * 60 * 1000
 
 let update (msg: Msg) (state: State): State * Cmd<Msg> =
     match msg with
@@ -219,7 +219,15 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
                                             }
                                             |> Some
                                     }
-                            | GameEnded -> state
+                                | DeckIsOver -> state
+                            | GameEnded ->
+                                { state with
+                                    GameState =
+                                        state.GameState
+                                        |> Option.map (fun x ->
+                                            { x with MoveStage = GameEnd }
+                                        )
+                                }
                         i + 1, Map.add i (sprintf "%A" x) gameLog, state
                     )
                     (i, gameLog, state)
@@ -418,8 +426,66 @@ let containerBox (state : State) (dispatch : Msg -> unit) =
                                 ]
                             | GameEnd -> str "GameEnd"
 
+                            Table.table [] [
+                                tbody []
+                                    [
+                                        tr [] [
+                                            th [] [ str "Name" ]
+                                            th [] [ str "Hand" ]
+                                            th [] [ str "Points" ]
+                                            th [] [ str "SanityPoints" ]
+                                        ]
+                                        let p = gameState.ClientPlayer
+
+                                        tr [] [
+                                            td [] [
+                                                str p.Name
+                                            ]
+                                            td [] [
+                                                str (string p.Hand)
+                                            ]
+                                            td [] [
+                                                str (string p.Points)
+                                            ]
+                                            td [] [
+                                                str (string p.SanityPoints)
+                                            ]
+                                        ]
+                                    ]
+                            ]
+
+                            Table.table [] [
+                                tbody []
+                                    (seq {
+                                        tr [] [
+                                            th [] [ str "UserId" ]
+                                            th [] [ str "Hand" ]
+                                            th [] [ str "Points" ]
+                                            th [] [ str "SanityPoints" ]
+                                        ]
+                                        yield!
+                                            gameState.OtherPlayers
+                                            |> Seq.map (fun (KeyValue(userId, otherPlayer)) ->
+                                                tr [] [
+                                                    td [] [
+                                                        str userId
+                                                    ]
+                                                    td [] [
+                                                        str (string otherPlayer.Hand)
+                                                    ]
+                                                    td [] [
+                                                        str (string otherPlayer.Points)
+                                                    ]
+                                                    td [] [
+                                                        str (string otherPlayer.SanityPoints)
+                                                    ]
+                                                ]
+                                            )
+                                    })
+                            ]
+
                             div [] [
-                                str (sprintf "%A" gameState)
+                                str (sprintf "Discard: %A" gameState.Discard)
                             ]
                         ]
                     ]

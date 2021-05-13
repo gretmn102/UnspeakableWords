@@ -71,6 +71,7 @@ type GameResponse =
     | TakeLetters of LetterId list
 
     | DiscardToDeck
+    | DeckIsOver
 
     | NowTurn of UserId
     | WordSucc of Word

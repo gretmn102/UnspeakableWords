@@ -20,6 +20,7 @@ and Draws =
     /// В колоде не хватило карт, чтобы восполнить руку. Отбой переворачивается и считается как колода.
     /// Первый список - карты со старой колоды, 2-ой из новой.
     | DrawsWithDiscardReuse of LetterId list * LetterId list * Move
+    | DeckIsOver of Move
 and InsaneCheckResult =
     /// Спятил. Карты с руки отправляются в отбой.
     | GotInsane of LetterId list * Move
@@ -53,7 +54,46 @@ let handCap = 7
 
 let draw n (p:Player<LetterId Set>) (st:State) next : Draws =
     let rec f (hand, handList) n deck =
-        if n <= 0 then // достаточно '=', но кто его знает.
+        if n > 0 then
+            match deck with
+            | [] ->
+                let splitAt n xs =
+                    let rec f n acc xs =
+                        if n > 0 then
+                            match xs with
+                            | x::xs ->
+                                f (n - 1) (x::acc) xs
+                            | [] -> List.rev acc, []
+                        else
+                            List.rev acc, xs
+                    f n [] xs
+                match st.Discards with
+                | [] ->
+                    let st =
+                        { st with
+                            PlsCircle = LZC.removeR st.PlsCircle |> Option.get
+                        }
+                    DeckIsOver(next st)
+                | discards ->
+                    let cardFromDeck, deck = splitAt n (List.rev discards)
+
+                    let hand =
+                        cardFromDeck
+                        |> List.fold
+                            (fun hand x ->
+                                Set.add x hand)
+                            hand
+                    let p = { p with Hand = hand }
+                    let st =
+                        { st with
+                            Deck = deck
+                            Pls = Map.add p.Name p st.Pls
+                            Discards = []
+                        }
+                    DrawsWithDiscardReuse(List.rev handList, cardFromDeck, next st)
+            | x::xs ->
+                f (Set.add x hand, x::handList) (n-1) xs
+        else
             let p = { p with Hand = hand }
             let st = {
                 st with
@@ -61,26 +101,6 @@ let draw n (p:Player<LetterId Set>) (st:State) next : Draws =
                     Deck = deck
                 }
             Draws(List.rev handList, next st)
-        else
-            match deck with
-            | [] ->
-                let cardFromDeck, deck = List.splitAt n (List.rev st.Discards)
-                let hand =
-                    cardFromDeck
-                    |> List.fold
-                        (fun hand x ->
-                            Set.add x hand)
-                        hand
-                let p = { p with Hand = hand }
-                let st = {
-                    st with
-                        Deck = deck
-                        Pls = Map.add p.Name p st.Pls
-                        Discards = []
-                    }
-                DrawsWithDiscardReuse(List.rev handList, cardFromDeck, next st)
-            | x::xs ->
-                f (Set.add x hand, x::handList) (n-1) xs
     f (p.Hand, []) n st.Deck
 
 let diceMax = 20

@@ -164,6 +164,21 @@ let update clientDispatch msg state =
                 |> MoveResult
                 |> clientDispatch
             state, Cmd.none
+        | state, Shared.DiscardHand ->
+            match state with
+            | Connected u ->
+                let x = m.PostAndReply(fun r -> DiscardHand(u.Name, r))
+
+                x.Return
+                |> MoveResult
+                |> clientDispatch
+
+                sendAllMessages u.Name clientDispatch x.PlayersMsgs
+            | Disconnected ->
+                Error (GetStateError YouAreNotLogin)
+                |> MoveResult
+                |> clientDispatch
+            state, Cmd.none
         | Disconnected, SendMsg m ->
             state, Cmd.none
         | Connected u, SendMsg m ->

@@ -38,6 +38,7 @@ type Msg =
     | RemoveNotify of int
 
     | Move
+    | DiscardHand
 
     | SelectedLettersAdd of LetterId
     | SelectedLettersRemove of LetterId
@@ -271,6 +272,37 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
                                             |> Some
                                     }
                                 | RemovePlayerBecauseCardsIsLeft -> state
+                                | OtherDiscardHand letters ->
+                                    { state with
+                                        GameState =
+                                            let gameState =
+                                                { gameState with
+                                                    Discard = letters @ gameState.Discard
+                                                }
+
+                                            let currentPlayerId = gameState.CurrentPlayerMove
+                                            if currentPlayerId = state.PlayerId then
+                                                { gameState with
+                                                    ClientPlayer =
+                                                        let p = gameState.ClientPlayer
+                                                        { p with
+                                                            Hand = []
+                                                        }
+                                                }
+                                            else
+                                                let pls = gameState.OtherPlayers
+                                                let p = pls.[currentPlayerId]
+                                                { gameState with
+                                                    OtherPlayers =
+                                                        Map.add
+                                                            currentPlayerId
+                                                            { p with
+                                                                Hand = 0
+                                                            }
+                                                            pls
+                                                }
+                                            |> Some
+                                    }
                             | GameEnded ->
                                 { state with
                                     GameState =
@@ -341,7 +373,6 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
                     )
             }
         state, cmd
-
     | SelectedLettersAdd letter ->
         let state =
             { state with
@@ -352,6 +383,22 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
             { state with
                 SelectedLetters = List.filter ((<>) letter) state.SelectedLetters }
         state, Cmd.none
+    | DiscardHand ->
+        let cmd =
+            Cmd.bridgeSend Shared.DiscardHand
+        let state =
+            { state with
+                SelectedLetters = []
+                GameState =
+                    state.GameState
+                    |> Option.map (fun gameState ->
+                        { gameState with
+                            MoveStage = ApprovingWord
+                        }
+                    )
+            }
+        state, cmd
+
     | Login ->
         match state.PlayerId with
         | "" -> state, Cmd.none
@@ -477,6 +524,14 @@ let containerBox (state : State) (dispatch : Msg -> unit) =
                                         Button.OnClick (fun _ -> if isEnabled then dispatch Move)
                                     ] [
                                         Fa.i [ Fa.Solid.Walking ] []
+                                    ]
+                                ]
+
+                                Control.p [] [
+                                    Button.a [
+                                        Button.OnClick (fun _ -> dispatch DiscardHand)
+                                    ] [
+                                        Fa.i [ Fa.Solid.Download ] []
                                     ]
                                 ]
                             | ApprovingWord ->

@@ -13,6 +13,7 @@ type 'a Res =
 type T =
     | Login of UserId * AsyncReplyChannel<Result<Client.GameState option, LoginError> Res>
     | Move of (UserId * Word) * AsyncReplyChannel<Result<unit, MoveError> Res>
+    | DiscardHand of UserId * AsyncReplyChannel<Result<unit, MoveError> Res>
 
 type GameState =
     | Mov of Abstr.Mov
@@ -72,13 +73,119 @@ let throwDice =
     let n = Abstr.diceMax + 1
     fun () -> r.Next(1, n)
 
-let exec state =
-    let justReturn x =
-        {
-            Return = x
-            PlayersMsgs = Map.empty
-        }
-    function
+let justReturn x =
+    {
+        Return = x
+        PlayersMsgs = Map.empty
+    }
+
+let turn state playersMsgs = function
+    | Abstr.Move(abstrState, currPlayerIdMove, _) ->
+        let playersMsgs =
+            playersMsgs
+            |> Map.map (fun userId' v ->
+                GameResponse (NowTurn currPlayerIdMove)::v
+            )
+
+        { state with AbstrState = Some abstrState }, playersMsgs
+    | Abstr.End abstrState ->
+        let playersMsgs =
+            playersMsgs
+            |> Map.map (fun userId' v ->
+                GameEnded::v
+            )
+
+        { state with AbstrState = Some abstrState }, playersMsgs
+
+let draw userId state playersMsgs = function
+    | Abstr.Draws(letters, f) ->
+        let playersMsgs =
+            let lettersCount = letters.Length
+            playersMsgs
+            |> Map.map (fun userId' msgs ->
+                if userId = userId' then
+                    GameResponse (TakeLetters letters)
+                    :: msgs
+                else
+                    GameResponse (OtherTakeLetters lettersCount)
+                    :: msgs
+            )
+
+        let res = f ()
+        let state =
+            { state with
+                GameState = Some (Mov res)
+            }
+        turn state playersMsgs res
+    | Abstr.DrawsWithDiscardReuse(lettersBefore, lettersAfter, f) ->
+        let playersMsgs =
+            let lettersBeforeCount = lettersBefore.Length
+            let lettersAfterCount = lettersAfter.Length
+            playersMsgs
+            |> Map.map (fun userId' msgs ->
+                if userId = userId' then
+                    GameResponse (TakeLetters lettersAfter)
+                    :: GameResponse DiscardToDeck
+                    :: GameResponse (TakeLetters lettersBefore)
+                    :: msgs
+                else
+                    GameResponse (OtherTakeLetters lettersAfterCount)
+                    :: GameResponse DiscardToDeck
+                    :: GameResponse (OtherTakeLetters lettersBeforeCount)
+                    :: msgs
+            )
+
+        let res = f ()
+        let state =
+            { state with
+                GameState = Some (Mov res)
+            }
+        turn state playersMsgs res
+    | Abstr.RemovePlayerBecauseCardsIsLeft f ->
+        let playersMsgs =
+            playersMsgs
+            |> Map.map (fun userId' v ->
+                GameResponse RemovePlayerBecauseCardsIsLeft::v
+            )
+
+        let res = f ()
+        let state =
+            { state with
+                GameState = Some (Mov res)
+            }
+        turn state playersMsgs res
+    | Abstr.MoveWithoutDraw f ->
+        let res = f ()
+        let state =
+            { state with
+                GameState = Some (Mov res)
+            }
+        turn state playersMsgs res
+
+let act userId state (r:_ AsyncReplyChannel) fn =
+    if Map.containsKey userId state.Players then
+        match state.GameState with
+        | Some gameState ->
+            match gameState with
+            | Mov mov ->
+                match mov with
+                | Abstr.Move(abstrState, currPlayer, moveType) ->
+                    if currPlayer = userId then
+                        fn moveType
+                    else
+                        r.Reply (justReturn (Error NotYourMove))
+                        state
+                | Abstr.End _ ->
+                    r.Reply (justReturn (Error GameEndedError))
+                    state
+        | None ->
+            r.Reply (justReturn (Error GameHasNotStartedYet))
+            state
+    else
+        r.Reply (justReturn (Error (GetStateError YouAreNotLogin)))
+        state
+
+let exec state = function
     | Login(userId, r) ->
         let playersCount = Map.count state.Players
         if Map.containsKey userId state.Players then
@@ -223,170 +330,90 @@ let exec state =
                         state.Players |> Map.add userId ()
                 }
     | Move((userId, word), r) ->
-        if Map.containsKey userId state.Players then
-            match state.GameState with
-            | Some gameState ->
-                match gameState with
-                | Mov mov ->
-                    match mov with
-                    | Abstr.Move(abstrState, currPlayer, f) ->
-                        if currPlayer = userId then
-                            match f.PlayWord word with
-                            | Right x ->
-                                let st, playersMsgs =
-                                    match x with
-                                    | Abstr.WordSuccess (Abstr.ThrowDice getThrowDiceResult) ->
-                                        let wordSuccess = getThrowDiceResult (throwDice ())
-                                        let playersMsgs =
-                                            state.Players
-                                            |> Map.map (fun userId' v ->
-                                                [GameResponse (WordSucc word)]
-                                            )
-                                        let turn state playersMsgs = function
-                                            | Abstr.Move(abstrState, currPlayerIdMove, _) ->
-                                                let playersMsgs =
-                                                    playersMsgs
-                                                    |> Map.map (fun userId' v ->
-                                                        GameResponse (NowTurn currPlayerIdMove)::v
-                                                    )
+        act userId state r (fun moveType ->
+            match moveType.PlayWord word with
+            | Right x ->
+                let state, playersMsgs =
+                    match x with
+                    | Abstr.WordSuccess (Abstr.ThrowDice getThrowDiceResult) ->
+                        let wordSuccess = getThrowDiceResult (throwDice ())
+                        let playersMsgs =
+                            state.Players
+                            |> Map.map (fun userId' _ ->
+                                [GameResponse (WordSucc word)]
+                            )
 
-                                                { state with AbstrState = Some abstrState }, playersMsgs
-                                            | Abstr.End abstrState ->
-                                                let playersMsgs =
-                                                    playersMsgs
-                                                    |> Map.map (fun userId' v ->
-                                                        GameEnded::v
-                                                    )
+                        match wordSuccess.SanityCheckResult with
+                        | Abstr.Pass draws ->
+                            let playersMsgs =
+                                playersMsgs
+                                |> Map.map (fun userId' v ->
+                                    GameResponse
+                                        (SanityCheck
+                                            (wordSuccess.WordPoints, wordSuccess.DiceThrowResult, Pass))::v
+                                )
+                            draw userId state playersMsgs draws
 
-                                                { state with AbstrState = Some abstrState }, playersMsgs
-                                        let drawf playersMsgs = function
-                                            | Abstr.Draws(letters, f) ->
-                                                let playersMsgs =
-                                                    let lettersCount = letters.Length
-                                                    playersMsgs
-                                                    |> Map.map (fun userId' msgs ->
-                                                        if userId = userId' then
-                                                            GameResponse (TakeLetters letters)
-                                                            :: msgs
-                                                        else
-                                                            GameResponse (OtherTakeLetters lettersCount)
-                                                            :: msgs
-                                                    )
+                        | Abstr.NotPass insaneCheckResult ->
+                            let playersMsgs =
+                                playersMsgs
+                                |> Map.map (fun userId' v ->
+                                    GameResponse
+                                        (SanityCheck
+                                            (wordSuccess.WordPoints, wordSuccess.DiceThrowResult, NotPass))::v
+                                )
+                            match insaneCheckResult with
+                            | Abstr.NotInsane draws ->
+                                let playersMsgs =
+                                    playersMsgs
+                                    |> Map.map (fun userId' v ->
+                                        GameResponse (InsaneCheck NotInsane)::v
+                                    )
+                                draw userId state playersMsgs draws
+                            | Abstr.GotInsane(lettersToDiscard, f) ->
+                                let playersMsgs =
+                                    playersMsgs
+                                    |> Map.map (fun userId' v ->
+                                        GameResponse (Discard lettersToDiscard)::GameResponse (InsaneCheck Insane)::v
+                                    )
+                                let res = f ()
+                                let state =
+                                    { state with
+                                        GameState = Some (Mov res)
+                                    }
+                                turn state playersMsgs res
+                {
+                    Return = Ok ()
+                    PlayersMsgs = Map.map (fun _ -> List.rev) playersMsgs
+                }
+                |> r.Reply
 
-                                                let res = f ()
-                                                let state =
-                                                    { state with
-                                                        GameState = Some (Mov res)
-                                                    }
-                                                turn state playersMsgs res
-                                            | Abstr.DrawsWithDiscardReuse(lettersBefore, lettersAfter, f) ->
-                                                let playersMsgs =
-                                                    let lettersBeforeCount = lettersBefore.Length
-                                                    let lettersAfterCount = lettersAfter.Length
-                                                    playersMsgs
-                                                    |> Map.map (fun userId' msgs ->
-                                                        if userId = userId' then
-                                                            GameResponse (TakeLetters lettersAfter)
-                                                            :: GameResponse DiscardToDeck
-                                                            :: GameResponse (TakeLetters lettersBefore)
-                                                            :: msgs
-                                                        else
-                                                            GameResponse (OtherTakeLetters lettersAfterCount)
-                                                            :: GameResponse DiscardToDeck
-                                                            :: GameResponse (OtherTakeLetters lettersBeforeCount)
-                                                            :: msgs
-                                                    )
-
-                                                let res = f ()
-                                                let state =
-                                                    { state with
-                                                        GameState = Some (Mov res)
-                                                    }
-                                                turn state playersMsgs res
-                                            | Abstr.RemovePlayerBecauseCardsIsLeft f ->
-                                                let playersMsgs =
-                                                    playersMsgs
-                                                    |> Map.map (fun userId' v ->
-                                                        GameResponse RemovePlayerBecauseCardsIsLeft::v
-                                                    )
-
-                                                let res = f ()
-                                                let state =
-                                                    { state with
-                                                        GameState = Some (Mov res)
-                                                    }
-                                                turn state playersMsgs res
-                                            | Abstr.MoveWithoutDraw f ->
-                                                let res = f ()
-                                                let state =
-                                                    { state with
-                                                        GameState = Some (Mov res)
-                                                    }
-                                                turn state playersMsgs res
-
-                                        match wordSuccess.SanityCheckResult with
-                                        | Abstr.Pass draw ->
-                                            let players =
-                                                playersMsgs
-                                                |> Map.map (fun userId' v ->
-                                                    GameResponse
-                                                        (SanityCheck
-                                                            (wordSuccess.WordPoints, wordSuccess.DiceThrowResult, Pass))::v
-                                                )
-                                            drawf players draw
-
-                                        | Abstr.NotPass insaneCheckResult ->
-                                            let playersMsgs =
-                                                playersMsgs
-                                                |> Map.map (fun userId' v ->
-                                                    GameResponse
-                                                        (SanityCheck
-                                                            (wordSuccess.WordPoints, wordSuccess.DiceThrowResult, NotPass))::v
-                                                )
-                                            match insaneCheckResult with
-                                            | Abstr.NotInsane draw ->
-                                                let playersMsgs =
-                                                    playersMsgs
-                                                    |> Map.map (fun userId' v ->
-                                                        GameResponse (InsaneCheck NotInsane)::v
-                                                    )
-                                                drawf playersMsgs draw
-                                            | Abstr.GotInsane(lettersToDiscard, f) ->
-                                                let playersMsgs =
-                                                    playersMsgs
-                                                    |> Map.map (fun userId' v ->
-                                                        GameResponse (Discard lettersToDiscard)::GameResponse (InsaneCheck Insane)::v
-                                                    )
-                                                let res = f ()
-                                                let state =
-                                                    { state with
-                                                        GameState = Some (Mov res)
-                                                    }
-                                                turn state playersMsgs res
-                                {
-                                    Return = Ok ()
-                                    PlayersMsgs = Map.map (fun _ -> List.rev) playersMsgs
-                                }
-                                |> r.Reply
-
-                                st
-                            | Left err ->
-                                justReturn (Error (MovError err))
-                                |> r.Reply
-                                state
-                        else
-                            r.Reply (justReturn (Error NotYourMove))
-                            state
-                    | Abstr.End _ ->
-                        r.Reply (justReturn (Error GameEndedError))
-                        state
-            | None ->
-                r.Reply (justReturn (Error GameHasNotStartedYet))
                 state
-        else
-            r.Reply (justReturn (Error (GetStateError YouAreNotLogin)))
-            state
+            | Left err ->
+                justReturn (Error (MovError err))
+                |> r.Reply
+                state
+        )
+    | DiscardHand(userId, r) ->
+        act userId state r (fun moveType ->
+            let discardedLetters, x = moveType.DiscardHand ()
 
+            let state, playersMsgs =
+                let playersMsgs =
+                    state.Players
+                    |> Map.map (fun userId' _ ->
+                        [GameResponse (OtherDiscardHand discardedLetters)]
+                    )
+
+                draw userId state playersMsgs x
+            {
+                Return = Ok ()
+                PlayersMsgs = Map.map (fun _ -> List.rev) playersMsgs
+            }
+            |> r.Reply
+
+            state
+        )
 let m =
     MailboxProcessor.Start (fun mail ->
         let rec loop (st:State) =

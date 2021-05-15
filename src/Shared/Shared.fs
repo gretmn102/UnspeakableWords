@@ -70,7 +70,7 @@ type InsaneCheck =
 type GameResponse =
     | TakeLetters of LetterId list
     | OtherTakeLetters of int
-
+    | OtherDiscardHand of LetterId list
     | DiscardToDeck
     | RemovePlayerBecauseCardsIsLeft
 
@@ -136,6 +136,6 @@ type RemoteServerMsg =
     | SendMsg of string
     | UsersConnected
     | Move of Word
-
+    | DiscardHand
 module Remote =
     let socketPath = "/socket"

@@ -6,7 +6,7 @@ nuget Elmish.Bridge.Giraffe
 nuget FParsec
 nuget FSharp.Data
 nuget Saturn
-nuget Expecto
+nuget FuChu
 
 nuget Fable.Core
 nuget Fable.Elmish

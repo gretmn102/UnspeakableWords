@@ -25,6 +25,7 @@ type State =
         PlayersTable: {| Remain:int; OtherPlayers:UserId Set |}
         SelectedLetters: LetterId list
         ConnectedUsers : User list
+        NotificationsVisible: bool
     }
 
 type Msg =
@@ -51,6 +52,7 @@ let init(): State * Cmd<Msg> =
             SelectedLetters = []
             Connection = Disconnected
             ConnectedUsers = []
+            NotificationsVisible = false
         }
     state, Cmd.none
 
@@ -83,11 +85,11 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
 
             state, Cmd.bridgeSend UsersConnected
         | GameMsgs msgs ->
-            let i, gameLog = state.GameLog
-            let i', gameLog, state =
+            let gameLogId, gameLog = state.GameLog
+            let (gameLogId', gameLog), state =
                 msgs
                 |> List.fold
-                    (fun (i, gameLog, (state:State)) x ->
+                    (fun ((gameLogId, gameLog), (state:State)) x ->
                         let state =
                             match x with
                             | GameStarted gameState ->
@@ -143,6 +145,23 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
                                             }
                                             |> Some
                                     }
+                                | OtherTakeLetters lettersCounts ->
+                                    let currentPlayerId = gameState.CurrentPlayerMove
+                                    let pls = gameState.OtherPlayers
+                                    let p = pls.[currentPlayerId]
+                                    { state with
+                                        GameState =
+                                            { gameState with
+                                                OtherPlayers =
+                                                    Map.add
+                                                        currentPlayerId
+                                                        { p with
+                                                            Hand = p.Hand + lettersCounts
+                                                        }
+                                                        pls
+                                            }
+                                            |> Some
+                                    }
                                 | DiscardToDeck -> state
                                 | WordSucc word ->
                                     let gameState =
@@ -178,10 +197,46 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
                                             }
                                             |> Some
                                     }
-                                | CthulhuApproving(points, throwResult, res) ->
-                                    match res with
-                                    | Pass -> state
-                                    | NotPass ->
+                                | SanityCheck(points, throwResult, res) ->
+                                    { state with
+                                        GameState =
+                                            let currentPlayerId = gameState.CurrentPlayerMove
+                                            if currentPlayerId = state.PlayerId then
+                                                { gameState with
+                                                    ClientPlayer =
+                                                        let p = gameState.ClientPlayer
+                                                        { p with
+                                                            SanityPoints =
+                                                                match res with
+                                                                | Pass -> p.SanityPoints
+                                                                | NotPass ->
+                                                                    p.SanityPoints - 1
+                                                            Points = p.Points + points
+                                                        }
+                                                }
+                                            else
+                                                let pls = gameState.OtherPlayers
+                                                let p = pls.[currentPlayerId]
+                                                { gameState with
+                                                    OtherPlayers =
+                                                        Map.add
+                                                            currentPlayerId
+                                                            { p with
+                                                                SanityPoints =
+                                                                    match res with
+                                                                    | Pass -> p.SanityPoints
+                                                                    | NotPass ->
+                                                                        p.SanityPoints - 1
+                                                                Points = p.Points + points
+                                                            }
+                                                            pls
+                                                }
+                                            |> Some
+                                    }
+                                | InsaneCheck x ->
+                                    match x with
+                                    | NotInsane -> state
+                                    | Insane ->
                                         { state with
                                             GameState =
                                                 let currentPlayerId = gameState.CurrentPlayerMove
@@ -189,7 +244,9 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
                                                     { gameState with
                                                         ClientPlayer =
                                                             let p = gameState.ClientPlayer
-                                                            { p with SanityPoints = p.SanityPoints - 1}
+                                                            { p with
+                                                                Hand = []
+                                                            }
                                                     }
                                                 else
                                                     let pls = gameState.OtherPlayers
@@ -198,19 +255,13 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
                                                         OtherPlayers =
                                                             Map.add
                                                                 currentPlayerId
-                                                                { p with SanityPoints = p.SanityPoints - 1}
+                                                                { p with
+                                                                    Hand = 0
+                                                                }
                                                                 pls
                                                     }
                                                 |> Some
                                         }
-                                | InsaneCheck _ -> state
-                                    // { st with
-                                    //     GameState =
-                                    //         { gameState with
-                                    //             Discard = letters @ gameState.Discard
-                                    //         }
-                                    //         |> Some
-                                    // }
                                 | Discard letters ->
                                     { state with
                                         GameState =
@@ -219,7 +270,7 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
                                             }
                                             |> Some
                                     }
-                                | DeckIsOver -> state
+                                | RemovePlayerBecauseCardsIsLeft -> state
                             | GameEnded ->
                                 { state with
                                     GameState =
@@ -228,16 +279,17 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
                                             { x with MoveStage = GameEnd }
                                         )
                                 }
-                        i + 1, Map.add i (sprintf "%A" x) gameLog, state
+                        printfn "%A" x
+                        (gameLogId + 1, Map.add gameLogId (sprintf "%A" x) gameLog), state
                     )
-                    (i, gameLog, state)
+                    ((gameLogId, gameLog), state)
             let state =
                 { state with
-                    GameLog = i', gameLog
+                    GameLog = gameLogId', gameLog
                 }
             let cmd =
                 let xs =
-                    [i..i' - 1]
+                    [gameLogId..gameLogId' - 1]
                     |> List.map (fun i ->
                         async {
                             do! Async.Sleep removeNotifyMs
@@ -326,6 +378,10 @@ let navBrand =
         ]
     ]
 
+let getLetterById =
+    let allLetters = Map.ofList Init.allLetters
+    fun x -> Map.find x allLetters
+
 let containerBox (state : State) (dispatch : Msg -> unit) =
     Box.box' [ ] [
         let loginBox =
@@ -365,6 +421,8 @@ let containerBox (state : State) (dispatch : Msg -> unit) =
                             |> List.map (fun (word, userId) ->
                                 tr [] [
                                     td [] [
+                                        // word
+                                        // |> List.map (getLetterById >> fun x -> x.Name)
                                         word
                                         |> System.String.Concat
                                         |> str
@@ -414,8 +472,9 @@ let containerBox (state : State) (dispatch : Msg -> unit) =
 
                                 Control.p [ ] [
                                     Button.a [
-                                        Button.Disabled (List.isEmpty state.SelectedLetters)
-                                        Button.OnClick (fun _ -> dispatch Move)
+                                        let isEnabled = not (List.isEmpty state.SelectedLetters)
+                                        Button.Disabled (not isEnabled)
+                                        Button.OnClick (fun _ -> if isEnabled then dispatch Move)
                                     ] [
                                         Fa.i [ Fa.Solid.Walking ] []
                                     ]
@@ -530,31 +589,32 @@ let view (state : State) (dispatch : Msg -> unit) =
                 ]
             ]
 
-            state.GameLog
-            |> snd
-            |> Seq.map (fun (KeyValue(i, x)) ->
-                li [] [
-                    Notification.notification [
-                    ] [
-                        Notification.delete [
-                            Props [
-                                OnClick (fun e -> RemoveNotify i |> dispatch)
+            if state.NotificationsVisible then
+                state.GameLog
+                |> snd
+                |> Seq.map (fun (KeyValue(i, x)) ->
+                    li [] [
+                        Notification.notification [
+                        ] [
+                            Notification.delete [
+                                Props [
+                                    OnClick (fun e -> RemoveNotify i |> dispatch)
+                                ]
+                            ] []
+                            div [] [
+                                str (sprintf "%A" x)
                             ]
-                        ] []
-                        div [] [
-                            str (sprintf "%A" x)
                         ]
                     ]
+                )
+                |> List.ofSeq
+                |> ul [
+                    Style [
+                        Position PositionOptions.Absolute
+                        ZIndex 1
+                        Bottom 0
+                        Right 0
+                    ]
                 ]
-            )
-            |> List.ofSeq
-            |> ul [
-                Style [
-                    Position PositionOptions.Absolute
-                    ZIndex 1
-                    Bottom 0
-                    Right 0
-                ]
-            ]
         ]
     ]

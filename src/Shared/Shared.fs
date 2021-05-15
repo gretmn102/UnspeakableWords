@@ -61,7 +61,7 @@ module Client =
             MoveStage: MoveStage
         }
 
-type SanityCheck =
+type SanityCheckResult =
     | Pass
     | NotPass
 type InsaneCheck =
@@ -69,13 +69,14 @@ type InsaneCheck =
     | NotInsane
 type GameResponse =
     | TakeLetters of LetterId list
+    | OtherTakeLetters of int
 
     | DiscardToDeck
-    | DeckIsOver
+    | RemovePlayerBecauseCardsIsLeft
 
     | NowTurn of UserId
     | WordSucc of Word
-    | CthulhuApproving of points:int * throwResult:int * SanityCheck
+    | SanityCheck of points:int * throwResult:int * SanityCheckResult
     | InsaneCheck of InsaneCheck
     | Discard of LetterId list
 

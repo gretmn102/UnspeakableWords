@@ -17,9 +17,6 @@ NUGET
     Elmish.Bridge.Server (3.0.3)
       Elmish (>= 3.0)
       Fable.Remoting.Json (>= 2.3)
-    Expecto (9.0.2)
-      FSharp.Core (>= 4.6)
-      Mono.Cecil (>= 0.11.2)
     Fable.Browser.Blob (1.1)
       Fable.Core (>= 3.0)
       FSharp.Core (>= 4.6.2)
@@ -95,6 +92,8 @@ NUGET
     FSharp.Core (5.0)
     FSharp.Data (3.3.3)
       FSharp.Core (>= 4.3.4)
+    Fuchu (1.1)
+      FSharp.Core (>= 4.3.4)
     Fulma (2.10)
       Fable.Core (>= 3.0)
       Fable.React (>= 5.1)
@@ -150,7 +149,6 @@ NUGET
       Microsoft.Extensions.Primitives (>= 2.2)
       System.Buffers (>= 4.5)
     Microsoft.NETCore.Platforms (5.0)
-    Mono.Cecil (0.11.3)
     NETStandard.Library (2.0.3)
       Microsoft.NETCore.Platforms (>= 1.1)
     Newtonsoft.Json (12.0.3)
@@ -189,10 +187,10 @@ NUGET
       FSharp.Core (>= 4.3.4)
 GIT
   remote: https://github.com/gretmn102/FsharpMyExtension.git
-     (ffdabe91cbe6cb6874fe4fa569a97fa8983a00ee)
+     (2b4ccb04b0e01a0402605868b59f62db10326916)
       build: build.cmd
       os: windows
-     (ffdabe91cbe6cb6874fe4fa569a97fa8983a00ee)
+     (2b4ccb04b0e01a0402605868b59f62db10326916)
       build: build.sh
       os: mono
 GROUP Build

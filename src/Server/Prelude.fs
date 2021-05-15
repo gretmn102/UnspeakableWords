@@ -35,7 +35,7 @@ let toClientGameState currPlayerId (abstrState:Abstr.State) (gameState:GameState
                     Client.PlayerId = userId
                     Client.SanityPoints = v.SanityPoints
                     Client.Points = v.Points
-                    Client.Hand = Abstr.handCap
+                    Client.Hand = v.Hand.Count
                 }
             )
         CurrentPlayerMove =

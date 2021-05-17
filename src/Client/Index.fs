@@ -136,6 +136,7 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
                                     { state with
                                         GameState =
                                             { gameState with
+                                                DeckCount = gameState.DeckCount - letters.Length
                                                 ClientPlayer =
                                                     let p = gameState.ClientPlayer
                                                     { p with
@@ -146,24 +147,33 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
                                             }
                                             |> Some
                                     }
-                                | OtherTakeLetters lettersCounts ->
+                                | OtherTakeLetters lettersCount ->
                                     let currentPlayerId = gameState.CurrentPlayerMove
                                     let pls = gameState.OtherPlayers
                                     let p = pls.[currentPlayerId]
                                     { state with
                                         GameState =
                                             { gameState with
+                                                DeckCount = gameState.DeckCount - lettersCount
                                                 OtherPlayers =
                                                     Map.add
                                                         currentPlayerId
                                                         { p with
-                                                            Hand = p.Hand + lettersCounts
+                                                            Hand = p.Hand + lettersCount
                                                         }
                                                         pls
                                             }
                                             |> Some
                                     }
-                                | DiscardToDeck -> state
+                                | DiscardToDeck ->
+                                    { state with
+                                        GameState =
+                                            { gameState with
+                                                Discard = []
+                                                DeckCount = gameState.DeckCount + gameState.Discard.Length
+                                            }
+                                            |> Some
+                                    }
                                 | WordSucc word ->
                                     let gameState =
                                         let currentPlayerId = gameState.CurrentPlayerMove
@@ -598,6 +608,9 @@ let containerBox (state : State) (dispatch : Msg -> unit) =
                                     })
                             ]
 
+                            div [] [
+                                str (sprintf "DeckCount: %A" gameState.DeckCount)
+                            ]
                             div [] [
                                 str (sprintf "Discard: %A" gameState.Discard)
                             ]

@@ -58,6 +58,7 @@ module Client =
             ClientPlayer: Player<LetterId list>
             PlayedWords: (Word * UserId) list
             Discard: LetterId list
+            DeckCount: int
             MoveStage: MoveStage
         }
 

@@ -52,8 +52,9 @@ let toClientGameState currPlayerId (abstrState:Abstr.State) (gameState:GameState
             abstrState.UsedWordsBy
         Discard =
             abstrState.Discards
+        DeckCount =
+            abstrState.Deck.Length
         MoveStage =
-
             match gameState with
             | Mov m ->
                 match m with
@@ -265,6 +266,7 @@ let exec state = function
                         )
                         abstrState
                 let playersMsgs =
+                    let deckLength = deck.Length
                     playersMsgs
                     |> Map.map (fun currPlayerId v ->
                         match gameState with
@@ -290,7 +292,7 @@ let exec state = function
                                             Points = p.Points
                                             SanityPoints = p.SanityPoints
                                         }
-
+                                    Client.DeckCount = deckLength
                                     Client.PlayedWords = []
                                     Client.Discard = []
                                     Client.MoveStage =

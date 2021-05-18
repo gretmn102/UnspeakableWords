@@ -22,6 +22,9 @@ nuget Zanaptak.TypedCssClasses
 git https://github.com/gretmn102/FsharpMyExtension.git master build: "build.cmd", OS: windows
 git https://github.com/gretmn102/FsharpMyExtension.git master build: "build.sh", OS: mono
 
+github david47k/top-english-wordlists top_english_nouns_mixed_500000.txt
+github Badestrand/russian-dictionary nouns.csv
+
 group Build
     source https://api.nuget.org/v3/index.json
     framework: netstandard2.0

@@ -208,6 +208,18 @@ let update (msg: Msg) (state: State): State * Cmd<Msg> =
                                             }
                                             |> Some
                                     }
+                                | WordNotExist word ->
+                                    let gameState =
+                                        let currentPlayerId = gameState.CurrentPlayerMove
+                                        if currentPlayerId = state.PlayerId then
+                                            { gameState with
+                                                MoveStage = StartingMove
+                                            }
+                                        else
+                                            gameState
+                                    { state with
+                                        GameState = Some gameState
+                                    }
                                 | SanityCheck(points, throwResult, res) ->
                                     { state with
                                         GameState =
@@ -436,7 +448,14 @@ let navBrand =
     ]
 
 let getLetterById =
-    let allLetters = Map.ofList Init.allLetters
+    let allEnglishLetters = Map.ofList Init.allEnglishLetters
+    let allRussianLetters = Map.ofList Init.allRussianLetters
+
+    fun language ->
+    let allLetters =
+        match language with
+        | English -> allEnglishLetters
+        | Russian -> allRussianLetters
     fun x -> Map.find x allLetters
 
 let containerBox (state : State) (dispatch : Msg -> unit) =
@@ -478,9 +497,8 @@ let containerBox (state : State) (dispatch : Msg -> unit) =
                             |> List.map (fun (word, userId) ->
                                 tr [] [
                                     td [] [
-                                        // word
-                                        // |> List.map (getLetterById >> fun x -> x.Name)
                                         word
+                                        |> List.map (getLetterById gameState.Language >> fun x -> x.Name)
                                         |> System.String.Concat
                                         |> str
                                     ]
@@ -511,7 +529,9 @@ let containerBox (state : State) (dispatch : Msg -> unit) =
                                         Button.span [
                                             Button.OnClick (fun _ -> dispatch (SelectedLettersAdd letter))
                                         ] [
-                                            str (string letter)
+                                            letter
+                                            |> getLetterById gameState.Language |> fun x -> string x.Name
+                                            |> str
                                         ]
                                         |> Some
                                 )
@@ -522,7 +542,10 @@ let containerBox (state : State) (dispatch : Msg -> unit) =
                                     Button.span [
                                         Button.OnClick (fun _ -> dispatch (SelectedLettersRemove letter))
                                     ] [
-                                        str (string letter)
+                                        letter
+                                        |> getLetterById gameState.Language
+                                        |> fun x -> string x.Name
+                                        |> str
                                     ]
                                 )
                                 |> div []
@@ -566,7 +589,10 @@ let containerBox (state : State) (dispatch : Msg -> unit) =
                                                 str p.Name
                                             ]
                                             td [] [
-                                                str (string p.Hand)
+                                                p.Hand
+                                                |> List.map (getLetterById gameState.Language >> fun x -> x.Name)
+                                                |> System.String.Concat
+                                                |> str
                                             ]
                                             td [] [
                                                 str (string p.Points)
@@ -612,7 +638,10 @@ let containerBox (state : State) (dispatch : Msg -> unit) =
                                 str (sprintf "DeckCount: %A" gameState.DeckCount)
                             ]
                             div [] [
-                                str (sprintf "Discard: %A" gameState.Discard)
+                                gameState.Discard
+                                |> List.map (getLetterById gameState.Language >> fun x -> x.Name)
+                                |> sprintf "Discard: %A"
+                                |> str
                             ]
                         ]
                     ]

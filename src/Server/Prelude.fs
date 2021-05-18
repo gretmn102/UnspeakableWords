@@ -23,9 +23,12 @@ type State =
         Players: Map<UserId, unit>
         GameState: GameState option
         AbstrState: Abstr.State option
+        EnglishNouns: string Set
+        RussianNouns: string Set
+        Language: Shared.Language
     }
 
-let toClientGameState currPlayerId (abstrState:Abstr.State) (gameState:GameState) : Client.GameState =
+let toClientGameState currPlayerId (abstrState:Abstr.State) language (gameState:GameState) : Client.GameState =
     let pls = abstrState.Pls
     {
         OtherPlayers =
@@ -65,6 +68,7 @@ let toClientGameState currPlayerId (abstrState:Abstr.State) (gameState:GameState
                         Client.HasNotYourMoveYet
                 | Abstr.End _ ->
                     Client.GameEnd
+        Language = language
     }
 
 let maxPlayers = 3
@@ -163,6 +167,50 @@ let draw userId state playersMsgs = function
             }
         turn state playersMsgs res
 
+let getThrow userId word state playersMsgs = function
+    | Abstr.ThrowDice getThrowDiceResult ->
+        let wordSuccess = getThrowDiceResult (throwDice ())
+
+        match wordSuccess.SanityCheckResult with
+        | Abstr.Pass draws ->
+            let playersMsgs =
+                playersMsgs
+                |> Map.map (fun userId' v ->
+                    GameResponse
+                        (SanityCheck
+                            (wordSuccess.WordPoints, wordSuccess.DiceThrowResult, Pass))::v
+                )
+            draw userId state playersMsgs draws
+
+        | Abstr.NotPass insaneCheckResult ->
+            let playersMsgs =
+                playersMsgs
+                |> Map.map (fun userId' v ->
+                    GameResponse
+                        (SanityCheck
+                            (wordSuccess.WordPoints, wordSuccess.DiceThrowResult, NotPass))::v
+                )
+            match insaneCheckResult with
+            | Abstr.NotInsane draws ->
+                let playersMsgs =
+                    playersMsgs
+                    |> Map.map (fun userId' v ->
+                        GameResponse (InsaneCheck NotInsane)::v
+                    )
+                draw userId state playersMsgs draws
+            | Abstr.GotInsane(lettersToDiscard, f) ->
+                let playersMsgs =
+                    playersMsgs
+                    |> Map.map (fun userId' v ->
+                        GameResponse (Discard lettersToDiscard)::GameResponse (InsaneCheck Insane)::v
+                    )
+                let res = f ()
+                let state =
+                    { state with
+                        GameState = Some (Mov res)
+                    }
+                turn state playersMsgs res
+
 let act userId state (r:_ AsyncReplyChannel) fn =
     if Map.containsKey userId state.Players then
         match state.GameState with
@@ -193,7 +241,7 @@ let exec state = function
 
             match state.AbstrState, state.GameState with
             | Some abstrState, Some gameState ->
-                toClientGameState userId abstrState gameState
+                toClientGameState userId abstrState state.Language gameState
                 |> Some
                 |> Ok
                 |> justReturn
@@ -217,7 +265,17 @@ let exec state = function
                 |> Map.add userId []
 
             if playersCount + 1 = maxPlayers then // start the game
-                let deck = Init.allLetters |> List.map fst
+                let letters =
+                    match state.Language with
+                    | English ->
+                        Init.allEnglishLetters
+                    | Russian ->
+                        Init.allRussianLetters
+
+                let deck =
+                    letters
+                    |> List.map fst
+                    |> List.shuffle
 
                 let playersMsgs, pls, deck =
                     playersMsgs
@@ -237,7 +295,7 @@ let exec state = function
                             playersMsgs, Map.add playerId p pls, deck
                         )
                         (playersMsgs, Map.empty, deck)
-                let allLetters = Map.ofList Init.allLetters
+                let allLetters = Map.ofList letters
 
                 let abstrState: Abstr.State =
                     {
@@ -254,8 +312,19 @@ let exec state = function
                     }
 
                 let gameState =
+                    let nouns =
+                        match state.Language with
+                        | English -> state.EnglishNouns
+                        | Russian -> state.RussianNouns
                     Abstr.loop
-                        (fun _ -> true)
+                        (fun word ->
+                            word
+                            |> List.map (
+                                flip Map.find allLetters
+                                >> fun l -> l.Name)
+                            |> System.String.Concat
+                            |> flip Set.contains nouns
+                        )
                         (fun letters ->
                             letters
                             |> List.sumBy (fun cid ->
@@ -270,7 +339,7 @@ let exec state = function
                     playersMsgs
                     |> Map.map (fun currPlayerId v ->
                         match gameState with
-                        | Abstr.Move(state, currPlayerIdMove, _) ->
+                        | Abstr.Move(abstrState, currPlayerIdMove, _) ->
                             let x =
                                 {
                                     Client.OtherPlayers =
@@ -300,6 +369,7 @@ let exec state = function
                                             Client.StartingMove
                                         else
                                             Client.HasNotYourMoveYet
+                                    Client.Language = state.Language
                                 }
                             GameStarted x::v
                         | Abstr.End _ ->
@@ -337,53 +407,29 @@ let exec state = function
             | Right x ->
                 let state, playersMsgs =
                     match x with
-                    | Abstr.WordSuccess (Abstr.ThrowDice getThrowDiceResult) ->
-                        let wordSuccess = getThrowDiceResult (throwDice ())
+                    | Abstr.WordSuccess next ->
                         let playersMsgs =
                             state.Players
                             |> Map.map (fun userId' _ ->
                                 [GameResponse (WordSucc word)]
                             )
-
-                        match wordSuccess.SanityCheckResult with
-                        | Abstr.Pass draws ->
+                        getThrow userId word state playersMsgs next
+                    | Abstr.WordNotExist (pls, isApprove) ->
+                        let playersMsgs =
+                            state.Players
+                            |> Map.map (fun userId' _ ->
+                                [GameResponse (WordNotExist word)]
+                            )
+                        match isApprove false with
+                        | Abstr.PlsNotWordApproved ->
+                            state, playersMsgs
+                        | Abstr.PlsWordApproved next ->
                             let playersMsgs =
                                 playersMsgs
-                                |> Map.map (fun userId' v ->
-                                    GameResponse
-                                        (SanityCheck
-                                            (wordSuccess.WordPoints, wordSuccess.DiceThrowResult, Pass))::v
+                                |> Map.map (fun userId' _ ->
+                                    [GameResponse (WordSucc word)]
                                 )
-                            draw userId state playersMsgs draws
-
-                        | Abstr.NotPass insaneCheckResult ->
-                            let playersMsgs =
-                                playersMsgs
-                                |> Map.map (fun userId' v ->
-                                    GameResponse
-                                        (SanityCheck
-                                            (wordSuccess.WordPoints, wordSuccess.DiceThrowResult, NotPass))::v
-                                )
-                            match insaneCheckResult with
-                            | Abstr.NotInsane draws ->
-                                let playersMsgs =
-                                    playersMsgs
-                                    |> Map.map (fun userId' v ->
-                                        GameResponse (InsaneCheck NotInsane)::v
-                                    )
-                                draw userId state playersMsgs draws
-                            | Abstr.GotInsane(lettersToDiscard, f) ->
-                                let playersMsgs =
-                                    playersMsgs
-                                    |> Map.map (fun userId' v ->
-                                        GameResponse (Discard lettersToDiscard)::GameResponse (InsaneCheck Insane)::v
-                                    )
-                                let res = f ()
-                                let state =
-                                    { state with
-                                        GameState = Some (Mov res)
-                                    }
-                                turn state playersMsgs res
+                            getThrow userId word state playersMsgs next
                 {
                     Return = Ok ()
                     PlayersMsgs = Map.map (fun _ -> List.rev) playersMsgs
@@ -417,6 +463,69 @@ let exec state = function
             state
         )
 let m =
+    let filterWords words =
+        words
+        |> Array.filter (fun (word:string) ->
+            let isValidLength =
+                let l = word.Length
+                1 < l && l <= 7
+            let isValid =
+                word
+                |> String.forall (fun x ->
+                    System.Char.IsLower x
+                    && System.Char.IsLetter x
+                )
+            isValidLength && isValid
+        )
+    let st =
+        {
+            Players = Map.empty
+            GameState = None
+            AbstrState = None
+            EnglishNouns =
+                printfn "English dictionary loading..."
+                let words =
+                    let path =
+                        #if DEBUG
+                        @"../../paket-files/david47k/top-english-wordlists/top_english_nouns_mixed_500000.txt"
+                        #else
+                        "english_nouns.txt"
+                        #endif
+                    let words =
+                        try
+                            // let path = "paket-files/david47k/top-english-wordlists/top_english_nouns_mixed_500000.txt"
+                            System.IO.File.ReadAllLines path
+                        with e ->
+                            printfn "%s" e.Message
+                            [||]
+                    filterWords words
+                    |> Set.ofArray
+                printfn "English dictionary loaded"
+                words
+            RussianNouns =
+                printfn "Russian dictionary loading..."
+                let words =
+                    let path =
+                        #if DEBUG
+                        @"../../paket-files/Badestrand/russian-dictionary/nouns.csv"
+                        #else
+                        "russian_nouns.csv"
+                        #endif
+                    let words =
+                        try
+                            // let path = "paket-files/Badestrand/russian-dictionary/nouns.csv"
+                            System.IO.File.ReadAllLines path
+                        with e ->
+                            printfn "%s" e.Message
+                            [||]
+                    words
+                    |> Array.map (fun x -> x.Split '\t' |> Array.head)
+                    |> filterWords
+                    |> Set.ofArray
+                printfn "Russian dictionary loaded"
+                words
+            Language = Russian
+        }
     MailboxProcessor.Start (fun mail ->
         let rec loop (st:State) =
             async {
@@ -429,12 +538,6 @@ let m =
                         st
 
                 return! loop st
-            }
-        let st =
-            {
-                Players = Map.empty
-                GameState = None
-                AbstrState = None
             }
         loop st
     )

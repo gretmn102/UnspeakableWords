@@ -193,6 +193,11 @@ GIT
      (2b4ccb04b0e01a0402605868b59f62db10326916)
       build: build.sh
       os: mono
+GITHUB
+  remote: david47k/top-english-wordlists
+    top_english_nouns_mixed_500000.txt (b7585f32cee8e140001054ad5b0bbf373245c360)
+  remote: Badestrand/russian-dictionary
+    nouns.csv (1fd608d858f88dd2c2f5fe7ba3a1c4057294caac)
 GROUP Build
 STORAGE: NONE
 RESTRICTION: == netstandard2.0

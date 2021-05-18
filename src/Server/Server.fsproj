@@ -5,6 +5,14 @@
     <TargetFramework>netcoreapp3.1</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <ContentWithTargetPath Include="..\..\paket-files\david47k\top-english-wordlists\top_english_nouns_mixed_500000.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>english_nouns.txt</TargetPath>
+    </ContentWithTargetPath>
+    <ContentWithTargetPath Include="..\..\paket-files\Badestrand\russian-dictionary\nouns.csv">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>russian_nouns.csv</TargetPath>
+    </ContentWithTargetPath>
     <None Include="paket.references" />
     <Compile Include="Abstr.fs" />
     <Compile Include="Prelude.fs" />
@@ -16,5 +24,6 @@
   <ItemGroup Condition=" '$(TargetFramework)' == 'netcoreapp3.1' ">
     <Reference Include="..\..\paket-files\github.com\gretmn102\FsharpMyExtension\FsharpMyExtension\FsharpMyExtension\bin\Release\netstandard2.0\FsharpMyExtension.dll" />
   </ItemGroup>
+
   <Import Project="..\..\.paket\Paket.Restore.targets" />
 </Project>

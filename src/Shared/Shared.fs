@@ -2,6 +2,10 @@ namespace Shared
 
 type UserId = string
 
+type Language =
+    | English
+    | Russian
+
 type LetterId = int
 type LetterValue = char
 type LetterUniq = LetterValue * LetterId
@@ -60,6 +64,7 @@ module Client =
             Discard: LetterId list
             DeckCount: int
             MoveStage: MoveStage
+            Language: Language
         }
 
 type SanityCheckResult =
@@ -77,6 +82,8 @@ type GameResponse =
 
     | NowTurn of UserId
     | WordSucc of Word
+    | WordNotExist of Word
+
     | SanityCheck of points:int * throwResult:int * SanityCheckResult
     | InsaneCheck of InsaneCheck
     | Discard of LetterId list
@@ -84,7 +91,7 @@ type GameResponse =
 module Init =
     type Letter = { Name:LetterValue; Points:int; Count:int }
 
-    let letters =
+    let englishLetters =
         [('A', 5, 10); ('B', 5, 2); ('C', 0, 2); ('D', 2, 3); ('E', 4, 10);
          ('F', 3, 2);  ('G', 2, 2); ('H', 4, 3); ('I', 4, 9); ('J', 2, 1);
          ('K', 3, 1);  ('L', 1, 5); ('M', 3, 3); ('N', 2, 5); ('O', 0, 8);
@@ -95,8 +102,35 @@ module Init =
             let name = System.Char.ToLower name
             name, { Name = name; Points = points; Count = count})
 
-    let allLetters =
-        letters
+    let allEnglishLetters =
+        englishLetters
+        |> List.mapFold (fun i (c, l) ->
+            let count = l.Count
+            List.init count (fun i' -> i + i', l), i + count
+        ) 0
+        |> fst
+        |> List.concat
+
+    let russianLetters =
+        // [('А', 5, 8); ('У', 2, 4); ('Д', 8, 4); ('П', 2, 4); ('В', 4, 4); ('Н', 4, 5); ('Е', 4, 6);
+        //  ('Ь', 3, 2); ('Я', 4, 2); ('С', 0, 5); ('З', 1, 2); ('Б', 4, 2); ('В', 5, 4); ('Г', 1, 3);
+        //  ('И', 2, 6); ('Г', 1, 3); ('И', 2, 6); ('Т', 2, 5); ('М', 3, 3); ('О', 0, 6); ('Й', 2, 1);
+        //  ('Л', 2, 4); ('К', 3, 4); ('Ю', 2, 1); ('Э', 2, 1); ('Ф', 4, 1); ('Щ', 3, 1); ('И', 2, 1);
+        //  ('Ж', 4, 1); ('Ы', 2, 1); ('Ш', 3, 1); ('З', 1, 1); ('Х', 4, 1); ('Ц', 2, 1); ] // ('Ё', 1)
+        // TODO: define points through corners of letters
+        [('А', 1, 8); ('Б', 3, 2); ('В', 1, 4); ('Г', 3, 2); ('Д', 2, 4);
+         ('Е', 1, 8); ('Ё', 3, 1); ('Ж', 5, 1); ('З', 5, 2); ('И', 1, 5);
+         ('Й', 4, 1); ('К', 2, 4); ('Л', 2, 4); ('М', 2, 3); ('Н', 1, 5);
+         ('О', 1, 10); ('П', 2, 4); ('Р', 1, 5); ('С', 1, 5); ('Т', 1, 5);
+         ('У', 2, 4); ('Х', 5, 1); ('Ц', 5, 1); ('Ч', 5, 1); ('Ш', 8, 1);
+         ('Ф', 10, 1); ('Щ', 10, 1); ('Ъ', 10, 1); ('Ы', 4, 2); ('Ь', 3, 2);
+         ('Э', 8, 1); ('Ю', 8, 1); ('Я', 3, 2)]
+        |> List.map (fun (name, points, count) ->
+            let name = System.Char.ToLower name
+            name, { Name = name; Points = points; Count = count})
+
+    let allRussianLetters =
+        russianLetters
         |> List.mapFold (fun i (c, l) ->
             let count = l.Count
             List.init count (fun i' -> i + i', l), i + count
